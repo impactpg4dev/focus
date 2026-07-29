@@ -32,15 +32,20 @@ import AppBar from '../../../components/surface/app-bar/AppBar';
 // Import generator
 import { generateDiseasesSurveyReport } from './diseases-survey';
 
-// Mapping...
+// Mapping template file name to actual file
+// Tambahkan template lain di sini sesuai kebutuhan
 const templateFileMap = {
   'Diseases Survey': 'diseases_survey.html',
   'Pengamatan': 'diseases_survey.html',
+  // Contoh: 'Persen Bunga': 'persen_bunga.html',
+  // 'Aktivitas Lain': 'template_lain.html',
 };
 
 const generatorMap = {
   'Diseases Survey': generateDiseasesSurveyReport,
   'Pengamatan': generateDiseasesSurveyReport,
+  // Tambahkan generator untuk aktivitas lain jika diperlukan
+  // 'Persen Bunga': generatePersenBungaReport,
 };
 
 // Helper untuk format timestamp
@@ -106,12 +111,16 @@ const BuatLaporan = () => {
         throw new Error(`Template untuk aktivitas "${templateKey}" belum didukung.`);
       }
 
+      // --- PERUBAHAN: Muat template dari folder public/assets menggunakan fetch ---
       let template;
       try {
-        const templateModule = await import(`../../../assets/${templateFileName}?raw`);
-        template = templateModule.default;
+        const response = await fetch(`/assets/${templateFileName}`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+        }
+        template = await response.text();
       } catch (err) {
-        throw new Error(`Gagal memuat template file: ${templateFileName}`);
+        throw new Error(`Gagal memuat template file: ${templateFileName} - ${err.message}`);
       }
 
       const html = await generator({
