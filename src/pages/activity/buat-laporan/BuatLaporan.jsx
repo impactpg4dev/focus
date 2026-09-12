@@ -31,21 +31,22 @@ import AppBar from '../../../components/surface/app-bar/AppBar';
 
 // Import generator
 import { generateDiseasesSurveyReport } from './diseases-survey';
+import { generateSanitasiAreaFruitReceiverReport } from './sanitasi/area-fruit-receiver';
 
 // Mapping template file name to actual file
-// Tambahkan template lain di sini sesuai kebutuhan
+// Gunakan key yang sama dengan nama aktivitas yang dikirim dari navigasi
 const templateFileMap = {
   'Diseases Survey': 'diseases_survey.html',
   'Pengamatan': 'diseases_survey.html',
-  // Contoh: 'Persen Bunga': 'persen_bunga.html',
-  // 'Aktivitas Lain': 'template_lain.html',
+  'Area Fruit Receiver': 'sanitasi_area_fruit_receiver.html', // key harus sesuai dengan activityData.nama_aktivitas
+  'Sanitasi PH': 'sanitasi_area_fruit_receiver.html', // fallback jika ada
 };
 
 const generatorMap = {
   'Diseases Survey': generateDiseasesSurveyReport,
   'Pengamatan': generateDiseasesSurveyReport,
-  // Tambahkan generator untuk aktivitas lain jika diperlukan
-  // 'Persen Bunga': generatePersenBungaReport,
+  'Area Fruit Receiver': generateSanitasiAreaFruitReceiverReport,
+  'Sanitasi PH': generateSanitasiAreaFruitReceiverReport,
 };
 
 // Helper untuk format timestamp
@@ -93,36 +94,51 @@ const BuatLaporan = () => {
     setLoading(true);
     setError('');
     try {
+      // --- Logging untuk debug ---
+      console.log('=== BuatLaporan: generateReport ===');
+      console.log('activityData:', activityData);
+      
       let activityKey = activityData.nama_aktivitas;
+      console.log('activityKey:', activityKey);
+      
+      // Cari generator berdasarkan activityKey atau inisial
       let generator = generatorMap[activityKey];
       if (!generator && activityData.inisial) {
         generator = generatorMap[activityData.inisial];
+        console.log('Menggunakan generator berdasarkan inisial:', activityData.inisial);
       }
       if (!generator) {
         throw new Error(`Generator untuk aktivitas "${activityKey}" belum tersedia.`);
       }
 
+      // Cari template file name
       let templateKey = activityKey;
       if (!templateFileMap[templateKey] && activityData.inisial) {
         templateKey = activityData.inisial;
+        console.log('Menggunakan templateKey berdasarkan inisial:', templateKey);
       }
       const templateFileName = templateFileMap[templateKey];
+      console.log('templateFileName:', templateFileName);
+      
       if (!templateFileName) {
         throw new Error(`Template untuk aktivitas "${templateKey}" belum didukung.`);
       }
 
-      // --- PERUBAHAN: Muat template dari folder public/assets menggunakan fetch ---
+      // Muat template dari public/assets
       let template;
       try {
         const response = await fetch(`/assets/${templateFileName}`);
+        console.log('Fetch response status:', response.status);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status} - ${response.statusText}`);
         }
         template = await response.text();
+        console.log('Template loaded, length:', template.length);
       } catch (err) {
         throw new Error(`Gagal memuat template file: ${templateFileName} - ${err.message}`);
       }
 
+      // Jalankan generator
       const html = await generator({
         dataIdentitasId,
         daftarAktivitasId,
@@ -130,6 +146,7 @@ const BuatLaporan = () => {
         identitasValues,
         template,
       });
+      console.log('HTML generated, length:', html.length);
 
       // Tambahkan CSS print agar tidak terpotong 2 halaman
       const printStyles = `
@@ -259,7 +276,7 @@ const BuatLaporan = () => {
       });
       pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
       const timestamp = getTimestamp();
-      pdf.save(`report_diseases_survey_${timestamp}.pdf`);
+      pdf.save(`report_area_fruit_receiver_${timestamp}.pdf`);
     } catch (err) {
       console.error('Error downloading PDF:', err);
       setError('Gagal mengunduh PDF: ' + err.message);
@@ -274,7 +291,7 @@ const BuatLaporan = () => {
       if (!canvas) return;
       const link = document.createElement('a');
       const timestamp = getTimestamp();
-      link.download = `report_diseases_survey_${timestamp}.png`;
+      link.download = `report_area_fruit_receiver_${timestamp}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
     } catch (err) {

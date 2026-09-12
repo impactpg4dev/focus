@@ -17,6 +17,9 @@ import {
   Stack,
   Skeleton,
   IconButton,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -26,6 +29,7 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { database, ref, get, child, update } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
@@ -45,10 +49,23 @@ const DataItem = () => {
   const [dataIdentitasId, setDataIdentitasId] = useState(null);
   const [daftarAktivitasId, setDaftarAktivitasId] = useState(null);
   const [aktivitasId, setAktivitasId] = useState(null);
-  const [jabatanName, setJabatanName] = useState('');
   const [pelakuId, setPelakuId] = useState(null);
-  const [pelakuName, setPelakuName] = useState(''); // <-- tambahan
+  const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
+  // 🔥 Tambahkan state untuk Status Approval
+  const [statusApproval, setStatusApproval] = useState('');
+
+  // State untuk izin dari dtb_daftar_aktivitas
+  const [isAllowedByDaftar, setIsAllowedByDaftar] = useState(false);
+  const [userRoleIds, setUserRoleIds] = useState([]);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
+
+  // State untuk group data
+  const [groupData, setGroupData] = useState({});
+  const [fieldGroupMap, setFieldGroupMap] = useState({});
+
+  // 🔥 State untuk mengecek apakah ada detail item
+  const [hasDetailItem, setHasDetailItem] = useState(false);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -59,7 +76,7 @@ const DataItem = () => {
   const navigationState = location.state;
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fungsi untuk mendapatkan warna status (sama seperti di DataIdentitas)
+  // Fungsi untuk mendapatkan warna status
   const getStatusColor = (statusName) => {
     if (!statusName) return 'default';
     const lower = statusName.toLowerCase();
@@ -72,23 +89,96 @@ const DataItem = () => {
     return 'text.primary';
   };
 
-  // Ambil nama jabatan dari database berdasarkan id_jabatan user
+  // ===== Ambil role user (ID) =====
+  const fetchUserRoles = async () => {
+    try {
+      const dbRef = ref(database);
+      const uid = userData?.uid || user?.uid;
+      if (!uid) return [];
+
+      const userRolesSnapshot = await get(child(dbRef, 'user_roles'));
+      const userRolesData = userRolesSnapshot.val();
+      if (!userRolesData) return [];
+
+      const userRoleKeys = Object.keys(userRolesData).filter(
+        key => userRolesData[key].uid === uid
+      );
+      if (userRoleKeys.length === 0) return [];
+
+      return userRoleKeys.map(key => userRolesData[key].id_role);
+    } catch (error) {
+      console.error('Error fetching user roles:', error);
+      return [];
+    }
+  };
+
+  // ===== Cek izin berdasarkan posisi dan role (AND) =====
+  const checkUserAllowed = (allowedPositions, allowedRoles) => {
+    if (!allowedPositions || !allowedRoles) return false;
+
+    let positions = allowedPositions;
+    let roles = allowedRoles;
+    if (positions && typeof positions === 'object' && !Array.isArray(positions)) {
+      positions = Object.values(positions);
+    }
+    if (roles && typeof roles === 'object' && !Array.isArray(roles)) {
+      roles = Object.values(roles);
+    }
+
+    positions = Array.isArray(positions) ? positions : [];
+    roles = Array.isArray(roles) ? roles : [];
+
+    const positionMatch = userData?.id_jabatan && positions.includes(userData.id_jabatan);
+    const roleMatch = userRoleIds.some(roleId => roles.includes(roleId));
+
+    return positionMatch && roleMatch;
+  };
+
+  // ===== Ambil data daftar aktivitas untuk cek izin =====
+  const fetchDaftarAktivitas = async (daftarId) => {
+    try {
+      const dbRef = ref(database);
+      const daftarSnapshot = await get(child(dbRef, 'dtb_daftar_aktivitas'));
+      const daftarData = daftarSnapshot.val();
+      if (!daftarData) return null;
+
+      const daftarList = Object.values(daftarData);
+      const found = daftarList.find(
+        item => item.id_daftar_aktivitas === daftarId && item.is_active === true
+      );
+      return found || null;
+    } catch (error) {
+      console.error('Error fetching daftar aktivitas:', error);
+      return null;
+    }
+  };
+
+  // Ambil role user
   useEffect(() => {
-    const fetchJabatan = async () => {
-      if (!userData?.id_jabatan) return;
-      try {
-        const dbRef = ref(database);
-        const jabatanRef = child(dbRef, `u_position/${userData.id_jabatan}`);
-        const snapshot = await get(jabatanRef);
-        if (snapshot.exists()) {
-          setJabatanName(snapshot.val().nama_jabatan || '');
-        }
-      } catch (err) {
-        console.error('Error fetching jabatan:', err);
+    const getRoles = async () => {
+      const roleIds = await fetchUserRoles();
+      setUserRoleIds(roleIds);
+      setRolesLoaded(true);
+    };
+    getRoles();
+  }, [userData]);
+
+  // Cek izin setelah role dan daftar aktivitas id tersedia
+  useEffect(() => {
+    if (!rolesLoaded || !daftarAktivitasId) return;
+
+    const checkPermission = async () => {
+      const daftar = await fetchDaftarAktivitas(daftarAktivitasId);
+      if (daftar) {
+        const allowed = checkUserAllowed(daftar.allowed_by_position, daftar.allowed_by_role);
+        setIsAllowedByDaftar(allowed);
+        console.log('🔍 DataItem -> isAllowedByDaftar:', allowed);
+      } else {
+        setIsAllowedByDaftar(false);
       }
     };
-    fetchJabatan();
-  }, [userData]);
+    checkPermission();
+  }, [rolesLoaded, daftarAktivitasId, userRoleIds, userData?.id_jabatan]);
 
   useEffect(() => {
     if (!navigationState || !navigationState.dataIdentitasId) {
@@ -103,30 +193,28 @@ const DataItem = () => {
     setActivityData(navigationState.activityData);
     setDaftarAktivitasData(navigationState.daftarAktivitasData);
 
-    // Ambil pelakuId
     const pelakuIdFromState = navigationState.pelakuId || null;
     const pelakuIdFromValues = navigationState.identitasValues?.pelakuId || null;
     const finalPelakuId = pelakuIdFromState || pelakuIdFromValues || null;
     setPelakuId(finalPelakuId);
 
-    // Ambil pelakuName
     const pelakuNameFromState = navigationState.pelakuName || '';
     const pelakuNameFromValues = navigationState.identitasValues?.pelakuName || '';
     setPelakuName(pelakuNameFromState || pelakuNameFromValues);
 
-    // Ambil statusName
     const statusFromState = navigationState.statusName || '';
     const statusFromValues = navigationState.identitasValues?.statusName || '';
     setStatusName(statusFromState || statusFromValues);
 
-    // DEBUG (opsional)
-    console.log('🔍 DataItem -> pelakuId:', finalPelakuId);
-    console.log('🔍 DataItem -> pelakuName:', pelakuNameFromState || pelakuNameFromValues);
-    console.log('🔍 DataItem -> statusName:', statusFromState || statusFromValues);
+    // 🔥 Ambil Status Approval dari navigationState
+    const statusApprovalFromState = navigationState.statusApproval || '';
+    const statusApprovalFromValues = navigationState.identitasValues?.statusApproval || '';
+    setStatusApproval(statusApprovalFromState || statusApprovalFromValues);
 
     fetchData();
   }, [navigationState, refreshKey]);
 
+  // Refresh data saat halaman terlihat
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && dataIdentitasId) {
@@ -155,21 +243,57 @@ const DataItem = () => {
     try {
       const dbRef = ref(database);
       const dataIdentitasId = navigationState.dataIdentitasId;
+      const daftarId = navigationState.daftarAktivitasId;
 
+      // 🔥 Cek apakah ada detail item untuk daftar aktivitas ini
+      const detailItemSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
+      const detailItemData = detailItemSnapshot.val();
+      let hasDetail = false;
+      if (detailItemData) {
+        const detailList = Object.values(detailItemData);
+        hasDetail = detailList.some(
+          item => item.daftar_aktivitas_id === daftarId && item.is_active === true
+        );
+      }
+      setHasDetailItem(hasDetail);
+
+      // Ambil data group
+      const groupSnapshot = await get(child(dbRef, 'dtb_group_item_aktivitas'));
+      const groupData = groupSnapshot.val();
+      const groupMap = {};
+      if (groupData) {
+        const groupList = Object.values(groupData);
+        const filteredGroups = groupList.filter(
+          g => g.daftar_aktivitas_id === daftarId && g.is_active === true
+        );
+        filteredGroups.forEach(g => {
+          groupMap[g.id_group_item_aktivitas] = g;
+        });
+      }
+      setGroupData(groupMap);
+
+      // Ambil field item untuk mapping group_id
+      const itemFieldsSnapshot = await get(child(dbRef, 'dtb_item_aktivitas'));
+      const itemFieldsData = itemFieldsSnapshot.val();
+      const itemFieldsMap = {};
+      const fieldGroupMapTemp = {};
+      if (itemFieldsData) {
+        Object.values(itemFieldsData).forEach(field => {
+          itemFieldsMap[field.id_item_aktivitas] = field;
+          const groupId = field.group_item_aktivitas_id || '';
+          if (groupId) {
+            fieldGroupMapTemp[field.id_item_aktivitas] = groupId;
+          }
+        });
+      }
+      setFieldGroupMap(fieldGroupMapTemp);
+
+      // Ambil data item
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
       const itemData = itemSnapshot.val();
 
       const valuesSnapshot = await get(child(dbRef, 'dtb_data_item_values'));
       const valuesData = valuesSnapshot.val();
-
-      const itemFieldsSnapshot = await get(child(dbRef, 'dtb_item_aktivitas'));
-      const itemFieldsData = itemFieldsSnapshot.val();
-      const itemFieldsMap = {};
-      if (itemFieldsData) {
-        Object.values(itemFieldsData).forEach(field => {
-          itemFieldsMap[field.id_item_aktivitas] = field;
-        });
-      }
 
       const groupedItems = {};
       if (itemData) {
@@ -186,6 +310,7 @@ const DataItem = () => {
             values: {},
             fullData: item,
             valueIds: [],
+            fieldDetails: {},
           };
         });
 
@@ -199,8 +324,13 @@ const DataItem = () => {
             itemValues.forEach(val => {
               const field = itemFieldsMap[val.item_aktivitas_id];
               const label = field?.label || val.item_aktivitas_id;
+              const groupId = fieldGroupMapTemp[val.item_aktivitas_id] || '';
               groupedItems[itemId].values[label] = val.value_text;
               groupedItems[itemId].valueIds.push(val.id_data_item_value);
+              groupedItems[itemId].fieldDetails[val.item_aktivitas_id] = {
+                label,
+                groupId,
+              };
             });
           });
         }
@@ -228,6 +358,11 @@ const DataItem = () => {
   };
 
   const handleViewDetail = (data) => {
+    // Jika tidak ada detail item, beri notifikasi atau langsung kembali
+    if (!hasDetailItem) {
+      setError('Daftar aktivitas ini tidak memiliki field detail item.');
+      return;
+    }
     navigate('/data-detail-item', {
       state: {
         dataItemId: data.id,
@@ -240,6 +375,7 @@ const DataItem = () => {
         daftarAktivitasData: daftarAktivitasData,
         pelakuId: pelakuId,
         statusName: statusName,
+        statusApproval: statusApproval, // kirim juga
       }
     });
   };
@@ -253,6 +389,7 @@ const DataItem = () => {
         daftarAktivitasData: daftarAktivitasData,
         pelakuId: pelakuId,
         statusName: statusName,
+        statusApproval: statusApproval,
         identitasValues: identitasValues,
       }
     });
@@ -267,6 +404,7 @@ const DataItem = () => {
         daftarAktivitasData: daftarAktivitasData,
         pelakuId: pelakuId,
         statusName: statusName,
+        statusApproval: statusApproval,
         identitasValues: identitasValues,
         editData: {
           itemId: data.id,
@@ -362,18 +500,50 @@ const DataItem = () => {
   };
 
   // ============================================================
-  // LOGIKA AKSES
+  // Fungsi untuk mengelompokkan values berdasarkan group
   // ============================================================
-  const isPengamat = jabatanName === 'Pengamat';
-  const isEditable = isPengamat && ['draft', 'ongoing', 'rejected'].includes(statusName);
-  const isAddable = isPengamat && ['draft', 'ongoing', 'rejected'].includes(statusName);
-  const isOwnData = isPengamat ? pelakuId === userData?.uid : true;
+  const getGroupedValues = (item) => {
+    const entries = Object.entries(item.values);
+    const grouped = {};
+    const ungrouped = [];
+
+    entries.forEach(([label, value]) => {
+      let groupId = '';
+      for (const fieldId in item.fieldDetails) {
+        if (item.fieldDetails[fieldId].label === label) {
+          groupId = item.fieldDetails[fieldId].groupId;
+          break;
+        }
+      }
+
+      if (groupId && groupData[groupId]) {
+        if (!grouped[groupId]) grouped[groupId] = [];
+        grouped[groupId].push({ label, value });
+      } else {
+        ungrouped.push({ label, value });
+      }
+    });
+
+    const sortedGroupIds = Object.keys(grouped).sort((a, b) => {
+      return (groupData[a]?.urutan || 0) - (groupData[b]?.urutan || 0);
+    });
+
+    return { grouped, ungrouped, sortedGroupIds };
+  };
+
+  // ============================================================
+  // LOGIKA AKSES (hanya berdasarkan allowed_by_position & allowed_by_role)
+  // ============================================================
+  const isAllowed = isAllowedByDaftar;
+  const isAddable = isAllowed && ['draft', 'ongoing', 'rejected'].includes(statusName);
+  const isEditable = isAddable;
+  const isOwnData = isAllowed ? pelakuId === userData?.uid : true;
 
   useEffect(() => {
-    if (isPengamat && !pelakuId && !loading) {
+    if (isAllowed && !pelakuId && !loading) {
       setError('Data identitas tidak memiliki pelaku, silakan periksa data.');
     }
-  }, [isPengamat, pelakuId, loading]);
+  }, [isAllowed, pelakuId, loading]);
 
   if (loading) {
     return (
@@ -398,8 +568,8 @@ const DataItem = () => {
     );
   }
 
-  // Cek akses
-  if (isPengamat && !isOwnData) {
+  // Cek akses: jika user diizinkan tetapi data bukan miliknya, tolak
+  if (isAllowed && !isOwnData) {
     return (
       <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pt: 0, pb: 10 }}>
         <AppBar title="Data Item" showBackButton onBackClick={handleBack} showLogout={false} />
@@ -450,9 +620,7 @@ const DataItem = () => {
           />
         </Box>
 
-        {/* ========================================================== */}
-        {/* DATA IDENTITAS - DENGAN PENAMBAHAN PENGAWAS & STATUS */}
-        {/* ========================================================== */}
+        {/* DATA IDENTITAS - DENGAN PERBAIKAN */}
         {Object.keys(identitasValues).length > 0 && (
           <Paper sx={{ p: 2, mb: 2, borderRadius: '4px', bgcolor: '#A5D6A7' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -461,27 +629,37 @@ const DataItem = () => {
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-              {/* Pengamat */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                  Pengamat
+                  Di Buat Oleh
                 </Typography>
                 <Typography variant="body2">
                   {pelakuName || '-'}
                 </Typography>
               </Box>
-              {/* Status */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                  Status
+                  Status Aktivitas
                 </Typography>
                 <Typography variant="body2" sx={{ color: getStatusColor(statusName), fontWeight: 500 }}>
                   {statusName || '-'}
                 </Typography>
               </Box>
-              {/* Field identitas lainnya */}
+              {/* 🔥 Status Approval - ditampilkan dengan label yang benar */}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                  Status Approval
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {statusApproval || '-'}
+                </Typography>
+              </Box>
+              {/* 🔥 Field identitas lainnya - kecuali currentStepId, workflowId, statusApproval, dan internal fields */}
               {Object.entries(identitasValues)
-                .filter(([key]) => !['id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName', 'catatanRevisi'].includes(key))
+                .filter(([key]) => 
+                  !['id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName', 
+                    'catatanRevisi', 'currentStepId', 'workflowId', 'statusApproval'].includes(key)
+                )
                 .map(([label, value]) => (
                   <Box
                     key={label}
@@ -539,7 +717,7 @@ const DataItem = () => {
         ) : (
           <Stack spacing={2}>
             {dataItems.map((data, index) => {
-              const entries = Object.entries(data.values);
+              const { grouped, ungrouped, sortedGroupIds } = getGroupedValues(data);
               
               return (
                 <Card 
@@ -572,11 +750,12 @@ const DataItem = () => {
 
                     <Divider sx={{ mb: 1.5 }} />
 
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      {entries.length > 0 ? (
-                        entries.map(([key, value]) => (
+                    {/* Render ungrouped fields */}
+                    {ungrouped.length > 0 && (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
+                        {ungrouped.map(({ label, value }) => (
                           <Box
-                            key={key}
+                            key={label}
                             sx={{
                               display: 'flex',
                               justifyContent: 'space-between',
@@ -585,7 +764,7 @@ const DataItem = () => {
                             }}
                           >
                             <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                              {key}
+                              {label}
                             </Typography>
                             <Typography 
                               variant="body2" 
@@ -598,31 +777,90 @@ const DataItem = () => {
                               {value || '-'}
                             </Typography>
                           </Box>
-                        ))
-                      ) : (
-                        <Typography variant="body2" color="text.secondary" align="center">
-                          Tidak ada data
-                        </Typography>
-                      )}
-                    </Box>
+                        ))}
+                      </Box>
+                    )}
+
+                    {/* Render grouped fields dalam Accordion */}
+                    {sortedGroupIds.map(groupId => {
+                      const group = groupData[groupId];
+                      const fields = grouped[groupId];
+                      if (!group || !fields || fields.length === 0) return null;
+                      return (
+                        <Accordion
+                          key={groupId}
+                          defaultExpanded={false}
+                          sx={{
+                            mb: 1.5,
+                            borderRadius: '4px !important',
+                            '&:before': { display: 'none' },
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                          }}
+                        >
+                          <AccordionSummary
+                            expandIcon={<ExpandMoreIcon />}
+                            sx={{
+                              backgroundColor: '#f5f5f5',
+                              borderRadius: '4px',
+                              '& .MuiAccordionSummary-content': { alignItems: 'center' },
+                              minHeight: 40,
+                            }}
+                          >
+                            <Typography variant="subtitle2" fontWeight="bold">
+                              {group.group_label || group.group_name || 'Group'}
+                            </Typography>
+                          </AccordionSummary>
+                          <AccordionDetails sx={{ pt: 1, pb: 1 }}>
+                            {fields.map(({ label, value }) => (
+                              <Box
+                                key={label}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  py: 0.5,
+                                }}
+                              >
+                                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                                  {label}
+                                </Typography>
+                                <Typography 
+                                  variant="body2" 
+                                  sx={{ 
+                                    maxWidth: '60%', 
+                                    textAlign: 'right',
+                                    wordBreak: 'break-word',
+                                  }}
+                                >
+                                  {value || '-'}
+                                </Typography>
+                              </Box>
+                            ))}
+                          </AccordionDetails>
+                        </Accordion>
+                      );
+                    })}
 
                     <Divider sx={{ my: 1.5 }} />
 
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<VisibilityIcon />}
-                          onClick={() => handleViewDetail(data)}
-                          sx={{
-                            borderRadius: '4px',
-                            textTransform: 'none',
-                            fontSize: '0.75rem',
-                          }}
-                        >
-                          Lihat Detail
-                        </Button>
+                        {/* 🔥 Tombol Lihat Detail hanya muncul jika ada detail item */}
+                        {hasDetailItem && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<VisibilityIcon />}
+                            onClick={() => handleViewDetail(data)}
+                            sx={{
+                              borderRadius: '4px',
+                              textTransform: 'none',
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            Lihat Detail
+                          </Button>
+                        )}
                       </Box>
                       {isEditable && (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

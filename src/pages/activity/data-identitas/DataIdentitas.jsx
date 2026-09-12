@@ -20,7 +20,7 @@ import {
   TextField,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
+  
   Visibility as VisibilityIcon,
   CalendarToday as CalendarIcon,
   EventNote as EventNoteIcon,
@@ -111,7 +111,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 3. Helper Approval (baru, tanpa dtb_aktivitas_approval_workflow)
+  // 3. Helper Approval
   // ============================================================
   const getWorkflowApproval = async (daftarAktivitasId) => {
     try {
@@ -133,7 +133,52 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 4. Log approval (dtb_workflow_log_data_approval)
+  // 4. 🔥 FUNGSI BARU: Ambil workflow approval dari assignment user
+  // ============================================================
+  const getWorkflowApprovalFromAssignment = async (daftarAktivitasId, uid) => {
+    try {
+      const dbRef = ref(database);
+      const assignmentSnapshot = await get(child(dbRef, 'dtb_workflow_approval_assignment'));
+      const assignmentData = assignmentSnapshot.val();
+      let workflowId = '';
+      if (assignmentData) {
+        for (const key in assignmentData) {
+          const item = assignmentData[key];
+          if (item.daftar_aktivitas_id === daftarAktivitasId && item.uid === uid && item.is_active !== false) {
+            workflowId = item.workflow_approval_id;
+            break;
+          }
+        }
+      }
+      if (!workflowId) {
+        console.warn('Tidak ada assignment untuk user ini pada daftar aktivitas ini.');
+        return { workflowId: '', stepId: '' };
+      }
+
+      const stepSnapshot = await get(child(dbRef, 'dtb_workflow_approval_steps'));
+      const stepData = stepSnapshot.val();
+      if (!stepData) return { workflowId, stepId: '' };
+
+      let firstStepId = '';
+      let minUrutan = Infinity;
+      for (const key in stepData) {
+        const step = stepData[key];
+        if (step.workflow_approval_id === workflowId && step.is_active === true) {
+          if (step.urutan < minUrutan) {
+            minUrutan = step.urutan;
+            firstStepId = step.id_workflow_approval_steps;
+          }
+        }
+      }
+      return { workflowId, stepId: firstStepId };
+    } catch (error) {
+      console.error('Error fetching workflow approval from assignment:', error);
+      return { workflowId: '', stepId: '' };
+    }
+  };
+
+  // ============================================================
+  // 5. Log approval
   // ============================================================
   const logApprovalHistory = async (
     dataIdentitasId,
@@ -183,7 +228,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 5. Helper: cari step berikutnya berdasarkan urutan
+  // 6. Helper: cari step berikutnya berdasarkan urutan
   // ============================================================
   const getNextStepId = (workflowApprovalId, currentUrutan) => {
     if (!workflowApprovalId || !currentUrutan) return null;
@@ -205,7 +250,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 6. Fungsi approve/reject (dengan status_aktivitas_id = approved dan status_approval diisi)
+  // 7. Fungsi approve/reject
   // ============================================================
   const processApproval = async (
     dataIdentitasId,
@@ -233,7 +278,6 @@ const DataIdentitas = () => {
       }
       if (!dataKey) return null;
 
-      // Ambil detail step dari currentStepId
       const currentStep = workflowStepsMap[currentStepId];
       const stepWorkflowId = currentStep?.workflow_approval_id || '';
       const stepUrutan = currentStep?.urutan || 0;
@@ -243,7 +287,6 @@ const DataIdentitas = () => {
 
       const actionType = newStatus === 'approved' ? 'approve' : 'reject';
 
-      // Log approve/reject
       await logApprovalHistory(
         dataIdentitasId,
         actionType,
@@ -271,18 +314,15 @@ const DataIdentitas = () => {
         const nextId = getNextStepId(stepWorkflowId, stepUrutan);
         if (nextId) {
           nextStepId = nextId;
-          // Ada step berikutnya: status_aktivitas_id = approved, status_approval = "Menunggu {nama_step_berikutnya}"
           finalStatus = 'approved';
           const nextStep = workflowStepsMap[nextId];
           const nextStepName = nextStep?.nama_step || 'Approval berikutnya';
           statusApprovalText = `Menunggu ${nextStepName}`;
-          // Update current_workflow_approval_steps_id ke step berikutnya
           await update(ref(database, `dtb_data_identitas_aktivitas/${dataKey}`), {
             current_workflow_approval_steps_id: nextId,
             updated_at: new Date().toISOString(),
           });
         } else {
-          // Tidak ada step berikutnya: status_aktivitas_id = approved, status_approval = "Approved"
           finalStatus = 'approved';
           statusApprovalText = 'Approved';
           await update(ref(database, `dtb_data_identitas_aktivitas/${dataKey}`), {
@@ -291,7 +331,6 @@ const DataIdentitas = () => {
           });
         }
       } else {
-        // Rejected: status_aktivitas_id = rejected, status_approval = "Rejected"
         finalStatus = 'rejected';
         statusApprovalText = 'Rejected';
         await update(ref(database, `dtb_data_identitas_aktivitas/${dataKey}`), {
@@ -300,7 +339,6 @@ const DataIdentitas = () => {
         });
       }
 
-      // Update status data
       const statusId = await getStatusId(finalStatus);
       await update(ref(database, `dtb_data_identitas_aktivitas/${dataKey}`), {
         status_aktivitas_id: statusId,
@@ -316,7 +354,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 7. Ambil data utama
+  // 8. Ambil data utama
   // ============================================================
   useEffect(() => {
     const fetchJabatan = async () => {
@@ -354,7 +392,6 @@ const DataIdentitas = () => {
       const roleIds = await fetchUserRoleIds();
       setUserRoleIds(roleIds);
 
-      // Ambil semua workflow steps
       const stepsSnapshot = await get(child(dbRef, 'dtb_workflow_approval_steps'));
       const stepsData = stepsSnapshot.val();
       const stepsMap = {};
@@ -365,7 +402,6 @@ const DataIdentitas = () => {
       }
       setWorkflowStepsMap(stepsMap);
 
-      // Ambil semua workflow approval
       const workflowSnapshot = await get(child(dbRef, 'dtb_workflow_approval'));
       const workflowData = workflowSnapshot.val();
       const workflowMap = {};
@@ -376,7 +412,6 @@ const DataIdentitas = () => {
       }
       setWorkflowApprovalsMap(workflowMap);
 
-      // Ambil daftar aktivitas
       const daftarSnapshot = await get(child(dbRef, 'dtb_daftar_aktivitas'));
       const daftarData = daftarSnapshot.val();
       if (daftarData) {
@@ -387,7 +422,6 @@ const DataIdentitas = () => {
         setDaftarAktivitasData(found);
       }
 
-      // Ambil aktivitas
       const aktivitasSnapshot = await get(child(dbRef, 'dtb_aktivitas'));
       const aktivitasData = aktivitasSnapshot.val();
       if (aktivitasData) {
@@ -398,11 +432,9 @@ const DataIdentitas = () => {
         setActivityData(found);
       }
 
-      // Ambil values identitas
       const valuesSnapshot = await get(child(dbRef, 'dtb_data_identitas_values'));
       const valuesData = valuesSnapshot.val();
 
-      // Ambil identitas fields
       const identitasSnapshot = await get(child(dbRef, 'dtb_identitas_aktivitas'));
       const identitasData = identitasSnapshot.val();
       const identitasMap = {};
@@ -412,7 +444,6 @@ const DataIdentitas = () => {
         });
       }
 
-      // Ambil lokasi
       const lokasiSnapshot = await get(child(dbRef, 'tb_status_lokasi'));
       const lokasiData = lokasiSnapshot.val();
       const lokasiMap = {};
@@ -424,7 +455,6 @@ const DataIdentitas = () => {
         });
       }
 
-      // Ambil status
       const statusSnapshot = await get(child(dbRef, 'dtb_status_aktivitas'));
       const statusData = statusSnapshot.val();
       const statusMap = {};
@@ -436,7 +466,6 @@ const DataIdentitas = () => {
         });
       }
 
-      // Ambil users
       const usersSnapshot = await get(child(dbRef, 'users'));
       const usersData = usersSnapshot.val();
       const userMap = {};
@@ -448,7 +477,6 @@ const DataIdentitas = () => {
         });
       }
 
-      // Group values
       const groupedData = {};
       if (valuesData) {
         const valuesList = Object.values(valuesData);
@@ -475,15 +503,13 @@ const DataIdentitas = () => {
         });
       }
 
-      // Ambil data identitas utama
       const identitasUtamaSnapshot = await get(child(dbRef, 'dtb_data_identitas_aktivitas'));
       const identitasUtamaData = identitasUtamaSnapshot.val();
 
-      // 🔥 Ambil filter tanggal dari navigationState
-    const filterTanggal = navigationState?.filterTanggal;
-    const fromCalendar = navigationState?.fromCalendar || false;
+      const filterTanggal = navigationState?.filterTanggal;
+      const fromCalendar = navigationState?.fromCalendar || false;
 
-    console.log('📅 Filter tanggal dari calendar:', filterTanggal);
+      console.log('📅 Filter tanggal dari calendar:', filterTanggal);
 
       const formattedData = Object.keys(groupedData).map(key => {
         const values = groupedData[key];
@@ -526,41 +552,29 @@ const DataIdentitas = () => {
         return identitasUtamaData[identitasKey].is_active === true;
       });
 
-      // 🔥 Jika ada filter tanggal, filter data berdasarkan tanggal pengamatan
-    let filteredByDate = formattedData;
-    if (filterTanggal && fromCalendar) {
-      // Cari field tanggal pengamatan di identitas
-      const tanggalField = identitasData ? Object.values(identitasData).find(
-        field => field.daftar_aktivitas_id === navigationState.daftarAktivitasId && 
-                (field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan')
-      ) : null;
+      let filteredByDate = formattedData;
+      if (filterTanggal && fromCalendar) {
+        const tanggalField = identitasData ? Object.values(identitasData).find(
+          field => field.daftar_aktivitas_id === navigationState.daftarAktivitasId && 
+                  (field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan')
+        ) : null;
 
-      if (tanggalField) {
-        const tanggalFieldId = tanggalField.id_identitas_aktivitas;
-        // Cari label field tanggal pengamatan
-        const tanggalLabel = tanggalField.label || 'Tanggal Pengamatan';
-        
-        filteredByDate = formattedData.filter(item => {
-          // Ambil nilai tanggal pengamatan dari data
-          const tanggalValue = item[tanggalLabel];
-          return tanggalValue === filterTanggal;
-        });
-        
-        console.log(`📊 Data setelah filter tanggal ${filterTanggal}:`, filteredByDate.length, 'item ditemukan');
-      } else {
-        console.warn('⚠️ Field Tanggal Pengamatan tidak ditemukan untuk daftar aktivitas ini');
+        if (tanggalField) {
+          const tanggalLabel = tanggalField.label || 'Tanggal Pengamatan';
+          filteredByDate = formattedData.filter(item => {
+            const tanggalValue = item[tanggalLabel];
+            return tanggalValue === filterTanggal;
+          });
+          console.log(`📊 Data setelah filter tanggal ${filterTanggal}:`, filteredByDate.length, 'item ditemukan');
+        } else {
+          console.warn('⚠️ Field Tanggal Pengamatan tidak ditemukan untuk daftar aktivitas ini');
+        }
       }
-    }
 
-    // ============================================================
-      // 🔥 TAMBAHAN: Filter berdasarkan lokasi jika dari hasil pencarian
-      // ============================================================
       let finalFilteredData = filteredByDate;
       if (navigationState?.filterLokasi && navigationState?.fromSearch) {
-        // Cari label lokasi dari filterLokasi menggunakan lokasiMap
         const lokasiLabel = lokasiMap[navigationState.filterLokasi];
         if (lokasiLabel) {
-          // Filter data berdasarkan properti "Lokasi" yang sudah diisi dengan label
           finalFilteredData = finalFilteredData.filter(item => item['Lokasi'] === lokasiLabel);
           console.log(`📍 Data setelah filter lokasi "${lokasiLabel}":`, finalFilteredData.length, 'item ditemukan');
         } else {
@@ -568,14 +582,10 @@ const DataIdentitas = () => {
         }
       }
 
-    filteredByDate.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    finalFilteredData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      filteredByDate.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      finalFilteredData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       setDataIdentitas(finalFilteredData);
-
-    //setDataIdentitas(filteredByDate);
-
-    
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -586,7 +596,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 8. Helper pengecekan approver berdasarkan step
+  // 9. Helper pengecekan approver berdasarkan step
   // ============================================================
   const isUserApproverForData = (data) => {
     if (!data.currentStepId) return false;
@@ -602,6 +612,24 @@ const DataIdentitas = () => {
     return assignedUsers.includes(userData?.uid);
   };
 
+  // 🔥 FUNGSI BARU: cek apakah user adalah approver di salah satu step di workflow yang sama
+  const isUserApproverForWorkflow = (data) => {
+    if (!data.workflowId) return false;
+    const steps = Object.values(workflowStepsMap).filter(
+      step => step.workflow_approval_id === data.workflowId && step.is_active === true
+    );
+    for (const step of steps) {
+      let assignedUsers = step.assigned_user_ids;
+      if (assignedUsers && typeof assignedUsers === 'object' && !Array.isArray(assignedUsers)) {
+        assignedUsers = Object.values(assignedUsers);
+      }
+      if (Array.isArray(assignedUsers) && assignedUsers.includes(userData?.uid)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const isApprovalButtonsVisible = (stepId) => {
     if (!stepId) return false;
     const step = workflowStepsMap[stepId];
@@ -610,7 +638,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 9. Handler
+  // 10. Handler
   // ============================================================
   const handleBack = () => {
     navigate('/');
@@ -770,7 +798,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 10. FUNGSI UNTUK AKSI MASSAL
+  // 11. FUNGSI UNTUK AKSI MASSAL
   // ============================================================
 
   const getStatusId = async (statusName) => {
@@ -853,22 +881,18 @@ const DataIdentitas = () => {
         let finalStatusId = null;
 
         if (actionType === 'kirim') {
-          const workflow = await getWorkflowApproval(navigationState.daftarAktivitasId);
-          let workflowId = workflow?.id_workflow_approval || '';
-          let firstStepId = '';
+          const { workflowId, stepId } = await getWorkflowApprovalFromAssignment(
+            navigationState.daftarAktivitasId,
+            currentItem.pelakuId || userId
+          );
+          
+          let firstStepId = stepId;
           let firstStepName = 'Approval';
-          if (workflow) {
-            const steps = Object.values(workflowStepsMap).filter(
-              step => step.workflow_approval_id === workflowId && step.is_active === true
-            );
-            steps.sort((a, b) => a.urutan - b.urutan);
-            if (steps.length > 0) {
-              firstStepId = steps[0].id_workflow_approval_steps;
-              firstStepName = steps[0].nama_step || 'Approval';
-            }
+          if (stepId) {
+            const step = workflowStepsMap[stepId];
+            firstStepName = step?.nama_step || 'Approval';
           }
 
-          // Log kirim
           await logApprovalHistory(
             id,
             actionType,
@@ -888,7 +912,6 @@ const DataIdentitas = () => {
             }
           );
 
-          // Update data identitas: status pending, set workflow_id, current_step, dan status_approval
           updates[`dtb_data_identitas_aktivitas/${key}/status_aktivitas_id`] = await getStatusId('pending');
           if (workflowId) {
             updates[`dtb_data_identitas_aktivitas/${key}/current_workflow_approval_id`] = workflowId;
@@ -913,7 +936,6 @@ const DataIdentitas = () => {
             currentItem.currentStepId
           );
           finalStatusId = await getStatusId('approved');
-          // status dan current step sudah diupdate di processApproval
         } else if (actionType === 'rejected') {
           const result = await processApproval(
             id,
@@ -964,7 +986,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 11. RENDER
+  // 12. RENDER
   // ============================================================
 
   if (loading) {
@@ -999,10 +1021,12 @@ const DataIdentitas = () => {
     item.is_active !== false
   );
 
-  // Data approval hanya untuk status pending atau approved (bukan draft)
+  // 🔥 2. Data approval: tampilkan data yang memiliki currentStepId, status pending/approved,
+  //     dan user adalah approver di salah satu step di workflow yang sama
   const approvalData = dataIdentitas.filter(item => 
     item.currentStepId && 
-    (item.statusName === 'pending' || item.statusName === 'approved')
+    (item.statusName === 'pending' || item.statusName === 'approved') &&
+    isUserApproverForWorkflow(item)
   );
 
   // Gabungkan, hindari duplikasi
@@ -1021,7 +1045,7 @@ const DataIdentitas = () => {
         (item.statusName === 'draft' || item.statusName === 'rejected')) {
       return true;
     }
-    // Atau data yang memiliki currentStepId, user adalah approver dan step approval aktif
+    // Atau data yang memiliki currentStepId, user adalah approver di step saat ini dan step approval aktif
     if (item.currentStepId && 
         isUserApproverForData(item) && 
         isApprovalButtonsVisible(item.currentStepId)) {
@@ -1131,7 +1155,6 @@ const DataIdentitas = () => {
               else if (isApproved) statusColor = 'success.main';
               else if (isRejected) statusColor = 'error.main';
 
-              // Tentukan warna untuk Status Approval
               let approvalStatusColor = 'text.secondary';
               const approvalText = data.statusApproval || '';
               if (approvalText.toLowerCase() === 'approved') {
@@ -1183,7 +1206,7 @@ const DataIdentitas = () => {
                         }}
                       >
                         <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                          Pengamat
+                          Di Buat Oleh
                         </Typography>
                         <Typography variant="body2">
                           {data.pelakuName || '-'}

@@ -21,7 +21,6 @@ import {
   Chip,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
   Save as SaveIcon,
 } from '@mui/icons-material';
 import { database, ref, get, child, push, set, update, remove } from '../../../config/firebase';
@@ -29,18 +28,18 @@ import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import dayjs from 'dayjs';
 
-// 🔥 Import untuk MobileDatePicker
+// Import untuk MobileDatePicker
 import { MobileDatePicker } from '@mui/x-date-pickers/MobileDatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 
-// 🔥 Opsi untuk field "Aktivitas"
+// Opsi untuk field "Aktivitas"
 const aktivitasOptions = [
   { label: 'Diseases Survey', value: 'Diseases Survey' },
   { label: 'Diseases Survey - Next 1', value: 'Diseases Survey - Next 1' },
 ];
 
-// 🔥 Helper: get week number from date string (DD/MM/YYYY) - SAMA PERSIS dengan TambahIdentitas
+// Helper: get week number from date string (DD/MM/YYYY)
 const getWeekNumber = (dateString) => {
   if (!dateString) return '';
   const parts = dateString.split('/');
@@ -54,6 +53,22 @@ const getWeekNumber = (dateString) => {
     return Math.ceil((diff + startOfYear.getDay() + 1) / 7);
   }
   return '';
+};
+
+// Helper: konversi DD/MM/YYYY ke YYYY-MM-DD
+const convertDateToYYYYMMDD = (dateStr) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const year = parseInt(parts[2], 10);
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) {
+      return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  return dateStr;
 };
 
 const EditIdentitas = () => {
@@ -73,6 +88,9 @@ const EditIdentitas = () => {
   const [activityData, setActivityData] = useState(null);
   const [daftarAktivitasData, setDaftarAktivitasData] = useState(null);
   const [dataIdentitasId, setDataIdentitasId] = useState(null);
+
+  // State untuk menyimpan opsi dari dtb_option_values per field
+  const [optionsMap, setOptionsMap] = useState({});
 
   const navigationState = location.state;
 
@@ -100,12 +118,9 @@ const EditIdentitas = () => {
         if (!currentValue) return;
 
         const normalize = (str) => str?.toLowerCase().trim() || '';
-
-        // Cek apakah currentValue adalah ID (ada di lokasiOptions)
         const isId = lokasiOptions.some(opt => opt.id_lokasi === currentValue);
-        if (isId) return; // Sudah ID, tidak perlu mapping
+        if (isId) return;
 
-        // Coba mapping dari label ke ID
         const matchedOption = lokasiOptions.find(opt => 
           normalize(opt.label) === normalize(currentValue) ||
           normalize(opt.lokasi) === normalize(currentValue)
@@ -119,6 +134,38 @@ const EditIdentitas = () => {
       }
     }
   }, [lokasiOptions, identitasFields, formValues]);
+
+  // Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan identitas_aktivitas_id
+  // Perbaikan: mendukung identitas_aktivitas_id berbentuk array
+  const fetchOptionValues = async (identitasAktivitasId) => {
+    try {
+      const dbRef = ref(database);
+      const snapshot = await get(child(dbRef, 'dtb_option_values'));
+      if (!snapshot.exists()) return [];
+
+      const data = snapshot.val();
+      const options = [];
+      for (const key in data) {
+        const item = data[key];
+        const id = item.identitas_aktivitas_id;
+        const isMatch = Array.isArray(id)
+          ? id.includes(identitasAktivitasId)
+          : id === identitasAktivitasId;
+        if (isMatch && item.is_active !== false) {
+          options.push({
+            label: item.option_label,
+            value: item.option_value,
+            urutan: item.urutan || 0,
+          });
+        }
+      }
+      options.sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
+      return options;
+    } catch (error) {
+      console.error('Error fetching option values:', error);
+      return [];
+    }
+  };
 
   const fetchIdentitasFields = async (daftarAktivitasId, existingValuesParam) => {
     setLoading(true);
@@ -159,8 +206,6 @@ const EditIdentitas = () => {
               return obj;
             }, {});
 
-          console.log('🔍 Filtered Existing Values:', filteredExisting);
-
           filteredIdentitas.forEach(field => {
             let value = '';
             const matchedKey = Object.keys(filteredExisting).find(
@@ -170,14 +215,35 @@ const EditIdentitas = () => {
             if (matchedKey) {
               value = filteredExisting[matchedKey] || '';
             }
+            // 🔥 Konversi tanggal (semua field tipe date) dari DD/MM/YYYY ke YYYY-MM-DD
+            const isDateField = field.tipe_input === 'date' || 
+                                field.label === 'Tanggal Pengamatan' || 
+                                field.nama_identitas === 'tanggal_pengamatan';
+            if (isDateField && value) {
+              value = convertDateToYYYYMMDD(value);
+            }
             initialValues[field.id_identitas_aktivitas] = value;
           });
 
-          console.log('🔍 Initial Values yang akan diset:', initialValues);
           setFormValues(initialValues);
+
+          // Ambil opsi untuk semua field select (kecuali yang ditangani khusus)
+          const selectFields = filteredIdentitas.filter(
+            f => f.tipe_input === 'select' &&
+            f.label !== 'Lokasi' &&
+            f.nama_identitas !== 'lokasi' &&
+            f.label !== 'Aktivitas' &&
+            f.nama_identitas !== 'aktivitas'
+          );
+
+          const optionsMapTemp = {};
+          for (const field of selectFields) {
+            const opts = await fetchOptionValues(field.id_identitas_aktivitas);
+            optionsMapTemp[field.id_identitas_aktivitas] = opts;
+          }
+          setOptionsMap(optionsMapTemp);
         }
 
-        // 🔥 Segera ambil opsi lokasi setelah daftar aktivitas ditemukan
         await fetchFilterLokasi(selectedDaftar.id_daftar_aktivitas);
       } else {
         setError('Daftar aktivitas tidak ditemukan.');
@@ -206,8 +272,6 @@ const EditIdentitas = () => {
         jenisTanamanList = activeFilter.map(item => item.jenis_tanaman);
       }
 
-      console.log('🔍 Jenis Tanaman List:', jenisTanamanList);
-
       if (jenisTanamanList.length > 0) {
         const lokasiSnapshot = await get(child(dbRef, 'tb_status_lokasi'));
         const lokasiData = lokasiSnapshot.val();
@@ -218,7 +282,6 @@ const EditIdentitas = () => {
             item => jenisTanamanList.includes(item.jenis_tanaman) && item.is_active !== false
           );
 
-          // 🔥 Kelompokkan lokasi berdasarkan (lokasi + jenis_tanaman) dan ambil yang tanggal_mulai_perawatan terbaru
           const groupedLokasi = {};
           filteredLokasi.forEach(item => {
             const key = `${item.lokasi}|${item.jenis_tanaman}`;
@@ -227,20 +290,15 @@ const EditIdentitas = () => {
             }
           });
 
-          // Konversi hasil grouping ke array untuk opsi
           const uniqueLokasi = Object.values(groupedLokasi);
-
           const formattedOptions = uniqueLokasi.map(item => ({
             id_lokasi: item.id_lokasi,
             label: `${item.lokasi}`,
             deskripsi: item.deskripsi,
             lokasi: item.lokasi,
           }));
-          console.log('🔍 Lokasi Options (grouped):', formattedOptions);
           setLokasiOptions(formattedOptions);
         }
-      } else {
-        console.warn('Tidak ada filter lokasi untuk daftar aktivitas ini.');
       }
     } catch (error) {
       console.error('Error fetching filter lokasi:', error);
@@ -256,36 +314,36 @@ const EditIdentitas = () => {
     }));
   };
 
-  // 🔥 Handler khusus untuk Tanggal Pengamatan: update Week Pengamatan otomatis
-  const handleTanggalPengamatanChange = (fieldId, value) => {
-    console.log('📅 handleTanggalPengamatanChange called with value:', value);
-    // value dari MobileDatePicker adalah dayjs object atau null
+  // 🔥 Handler untuk semua field date (tidak hanya Tanggal Pengamatan)
+  const handleDateChange = (fieldId, value, field) => {
     let formattedValue = '';
     let dateStrForWeek = '';
-    
     if (value && value.isValid()) {
-      // Format ke YYYY-MM-DD untuk disimpan
       formattedValue = value.format('YYYY-MM-DD');
-      // Format ke DD/MM/YYYY untuk perhitungan week (sesuai dengan getWeekNumber)
       dateStrForWeek = value.format('DD/MM/YYYY');
     }
 
     setFormValues(prev => {
       const newValues = { ...prev, [fieldId]: formattedValue };
-      const weekField = identitasFields.find(
-        f => f.label === 'Week Pengamatan' || f.nama_identitas === 'week_pengamatan'
-      );
-      if (weekField && dateStrForWeek) {
-        const weekNumber = getWeekNumber(dateStrForWeek);
-        if (weekNumber) {
-          newValues[weekField.id_identitas_aktivitas] = String(weekNumber);
-          console.log('✅ Week Pengamatan diisi:', weekNumber);
-        } else {
+      
+      // Jika field ini adalah tanggal pengamatan, update Week Pengamatan otomatis
+      const isTanggalPengamatan = field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan';
+      if (isTanggalPengamatan) {
+        const weekField = identitasFields.find(
+          f => f.label === 'Week Pengamatan' || f.nama_identitas === 'week_pengamatan'
+        );
+        if (weekField && dateStrForWeek) {
+          const weekNumber = getWeekNumber(dateStrForWeek);
+          if (weekNumber) {
+            newValues[weekField.id_identitas_aktivitas] = String(weekNumber);
+          } else {
+            newValues[weekField.id_identitas_aktivitas] = '';
+          }
+        } else if (weekField) {
           newValues[weekField.id_identitas_aktivitas] = '';
         }
-      } else if (weekField) {
-        newValues[weekField.id_identitas_aktivitas] = '';
       }
+      
       return newValues;
     });
   };
@@ -293,27 +351,24 @@ const EditIdentitas = () => {
   const renderInputField = (field) => {
     const value = formValues[field.id_identitas_aktivitas] || '';
     const isRequired = field.is_required === true;
-    const isTanggalPengamatan = field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan';
+    // 🔥 Gunakan tipe_input date untuk semua field tanggal, bukan hanya hardcoded
+    const isDateField = field.tipe_input === 'date';
 
-    // 🔥 Jika field adalah Tanggal Pengamatan, gunakan MobileDatePicker seperti di TambahIdentitas
-    if (isTanggalPengamatan) {
+    if (isDateField) {
       return (
         <LocalizationProvider dateAdapter={AdapterDayjs}>
           <MobileDatePicker
             label={field.label}
             value={value ? dayjs(value) : null}
-            onChange={(newValue) => handleTanggalPengamatanChange(field.id_identitas_aktivitas, newValue)}
+            onChange={(newValue) => handleDateChange(field.id_identitas_aktivitas, newValue, field)}
             format="DD/MM/YYYY"
-            disableFuture // 🔥 Mencegah pemilihan tanggal di masa depan
+            disableFuture
             slotProps={{
               textField: {
                 fullWidth: true,
                 required: isRequired,
                 size: 'medium',
-                sx: { 
-                  mt: 1, 
-                  '& .MuiOutlinedInput-root': { borderRadius: '4px' } 
-                }
+                sx: { mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }
               },
               dialog: {
                 sx: {
@@ -337,10 +392,9 @@ const EditIdentitas = () => {
                   '& .MuiBackdrop-root': {
                     backgroundColor: 'rgba(0, 0, 0, 0.5)',
                   },
-                  // 🔥 Mencegah close saat klik backdrop
                   '& .MuiDialog-root': {
                     '& .MuiBackdrop-root': {
-                      pointerEvents: 'none', // Mencegah klik pada backdrop
+                      pointerEvents: 'none',
                     }
                   }
                 }
@@ -349,9 +403,7 @@ const EditIdentitas = () => {
                 sx: {
                   backgroundColor: (theme) => theme.palette.primary.main,
                   color: 'white',
-                  '& .MuiTypography-root': {
-                    color: 'white',
-                  },
+                  '& .MuiTypography-root': { color: 'white' },
                 }
               },
               actionBar: {
@@ -364,14 +416,9 @@ const EditIdentitas = () => {
             }}
             closeOnSelect={false}
             views={['year', 'month', 'day']}
-            // 🔥 Mencegah close saat klik backdrop
             onClose={(reason) => {
-              if (reason === 'cancel' || reason === 'accept') {
-                return;
-              }
-              if (reason === 'escape') {
-                return;
-              }
+              if (reason === 'cancel' || reason === 'accept') return;
+              if (reason === 'escape') return;
               return false;
             }}
           />
@@ -379,7 +426,6 @@ const EditIdentitas = () => {
       );
     }
 
-    // Untuk field selain Tanggal Pengamatan, gunakan render biasa
     const onChangeHandler = handleInputChange;
 
     switch (field.tipe_input) {
@@ -409,26 +455,10 @@ const EditIdentitas = () => {
             sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
           />
         );
-      case 'date':
-        // Untuk case 'date' lainnya, tetap gunakan TextField type date
-        return (
-          <TextField
-            fullWidth
-            label={field.label}
-            type="date"
-            value={value}
-            onChange={(e) => onChangeHandler(field.id_identitas_aktivitas, e.target.value)}
-            required={isRequired}
-            size="medium"
-            InputLabelProps={{ shrink: true }}
-            sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
-          />
-        );
-      case 'select':
+      case 'select': {
         const isLokasiField = field.label === 'Lokasi' || field.nama_identitas === 'lokasi';
         const isAktivitasField = field.label === 'Aktivitas' || field.nama_identitas === 'aktivitas';
 
-        // 🔥 Jika field adalah Aktivitas, gunakan opsi khusus
         if (isAktivitasField) {
           return (
             <Autocomplete
@@ -442,12 +472,7 @@ const EditIdentitas = () => {
               size="medium"
               sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
               renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={field.label}
-                  required={isRequired}
-                  size="medium"
-                />
+                <TextField {...params} label={field.label} required={isRequired} size="medium" />
               )}
               renderOption={(props, option) => (
                 <li {...props}>
@@ -461,7 +486,6 @@ const EditIdentitas = () => {
           );
         }
 
-        // Field Lokasi
         if (isLokasiField) {
           return (
             <Autocomplete
@@ -478,12 +502,7 @@ const EditIdentitas = () => {
               noOptionsText="Tidak ada lokasi yang tersedia"
               sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
               renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={field.label}
-                  required={isRequired}
-                  size="medium"
-                />
+                <TextField {...params} label={field.label} required={isRequired} size="medium" />
               )}
               renderOption={(props, option) => (
                 <li {...props}>
@@ -499,36 +518,36 @@ const EditIdentitas = () => {
           );
         }
 
-        // Select biasa (fallback)
-        const selectOptions = [
-          { label: 'Opsi 1', value: 'option1' },
-          { label: 'Opsi 2', value: 'option2' },
-          { label: 'Opsi 3', value: 'option3' },
-        ];
+        // Field select lainnya
+        const fieldOptions = optionsMap[field.id_identitas_aktivitas] || [];
         return (
           <Autocomplete
             fullWidth
-            options={selectOptions}
+            options={fieldOptions}
             getOptionLabel={(option) => option.label || ''}
-            value={selectOptions.find(opt => opt.value === value) || null}
+            value={fieldOptions.find(opt => opt.value === value) || null}
             onChange={(event, newValue) => {
               handleInputChange(field.id_identitas_aktivitas, newValue ? newValue.value : '');
             }}
             size="medium"
+            loading={fieldOptions.length === 0}
+            loadingText="Memuat opsi..."
+            noOptionsText="Tidak ada opsi tersedia"
             sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
             renderInput={(params) => (
-              <TextField
-                {...params}
-                label={field.label}
-                required={isRequired}
-                size="medium"
-              />
+              <TextField {...params} label={field.label} required={isRequired} size="medium" />
+            )}
+            renderOption={(props, option) => (
+              <li {...props}>
+                <Typography variant="body2">{option.label}</Typography>
+              </li>
             )}
             isOptionEqualToValue={(option, val) => option.value === val?.value}
             disablePortal
             clearOnEscape
           />
         );
+      }
       case 'radio':
         return (
           <FormControl component="fieldset" sx={{ mt: 1 }}>
@@ -586,12 +605,9 @@ const EditIdentitas = () => {
 
     try {
       const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
-      // Update timestamp
-      await update(identitasRef, {
-        updated_at: new Date().toISOString(),
-      });
+      await update(identitasRef, { updated_at: new Date().toISOString() });
 
-      // 🔥 Cek field Catatan
+      // Cek field Catatan
       const catatanField = identitasFields.find(f => f.label === 'Catatan' || f.nama_identitas === 'catatan');
       if (catatanField) {
         const catatanValue = formValues[catatanField.id_identitas_aktivitas];
@@ -606,6 +622,7 @@ const EditIdentitas = () => {
         }
       }
 
+      // Hapus nilai lama
       const valuesRef = ref(database, 'dtb_data_identitas_values');
       const valuesSnapshot = await get(valuesRef);
       const valuesData = valuesSnapshot.val();
@@ -617,14 +634,15 @@ const EditIdentitas = () => {
         }
       }
 
-      // 🔥 Simpan nilai baru dengan format DD/MM/YYYY untuk tanggal pengamatan
+      // Simpan nilai baru dengan format DD/MM/YYYY untuk tanggal
       for (const field of identitasFields) {
         const value = formValues[field.id_identitas_aktivitas];
         if (value) {
           let valueText = value;
-          // Jika field adalah tanggal pengamatan dan value dalam format YYYY-MM-DD, ubah ke DD/MM/YYYY
-          const isTanggal = field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan';
-          if (isTanggal && typeof value === 'string' && value.includes('-')) {
+          const isDateField = field.tipe_input === 'date' || 
+                              field.label === 'Tanggal Pengamatan' || 
+                              field.nama_identitas === 'tanggal_pengamatan';
+          if (isDateField && typeof value === 'string' && value.includes('-')) {
             const parts = value.split('-');
             if (parts.length === 3) {
               valueText = `${parts[2]}/${parts[1]}/${parts[0]}`;
@@ -645,11 +663,7 @@ const EditIdentitas = () => {
         }
       }
 
-      // 🔥 PERBAIKAN: Hapus bagian yang mengubah status ke draft secara otomatis.
-      // Status hanya akan berubah melalui proses penambahan item/detail (TambahItem, TambahDetailItem).
-      // Jika ingin tetap mengikuti aturan, bisa dilakukan pengecekan, tetapi untuk edit identitas
-      // sebaiknya status tetap seperti sebelumnya.
-
+      // Status tidak diubah otomatis (hanya melalui proses item/detail)
     } catch (error) {
       console.error('Error saving edited identitas:', error);
       throw error;
@@ -693,7 +707,6 @@ const EditIdentitas = () => {
         showLogout={false}
       />
       <Container maxWidth="sm" sx={{ pt: 2, pb: 8, px: 2 }}>
-        {/* Header Info */}
         <Box sx={{ mb:2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box>
             <Typography variant="caption" color="text.secondary">
@@ -784,15 +797,10 @@ const EditIdentitas = () => {
         <Alert severity="success">{successMessage}</Alert>
       </Snackbar>
 
-      {/* 🔥 CSS Animasi untuk slide up (sama seperti di TambahIdentitas) */}
       <style jsx>{`
         @keyframes slideUp {
-          from {
-            transform: translateX(-50%) translateY(100%);
-          }
-          to {
-            transform: translateX(-50%) translateY(0);
-          }
+          from { transform: translateX(-50%) translateY(100%); }
+          to { transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </Box>

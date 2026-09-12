@@ -9,7 +9,6 @@ import {
 } from '@mui/material';
 import { useAuth } from '../../../context/AuthContext';
 import { database, ref, get } from '../../../config/firebase';
-import UserRealtimeInfo from './UserRealtimeInfo';
 import UserLocationInfo from './UserLocationInfo';
 import SearchBar from './SearchBar';
 import FeatureInfo from './FeatureInfo';

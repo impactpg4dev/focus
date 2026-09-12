@@ -11,7 +11,6 @@ import {
   IconButton,
   CircularProgress,
   Divider,
-  Chip,
   Alert,
   Snackbar,
   Card,
@@ -32,30 +31,7 @@ import { database, ref, get, child, push, set, update } from '../../../config/fi
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 
-// Opsi untuk field Losses
-const lossesOptions = [
-  { label: 'ABNDN', value: 'ABNDN' },
-  { label: 'ABNRL', value: 'ABNRL' },
-  { label: 'BD', value: 'BD' },
-  { label: 'BNECK', value: 'BNECK' },
-  { label: 'BRMXL', value: 'BRMXL' },
-  { label: 'BSV', value: 'BSV' },
-  { label: 'BT', value: 'BT' },
-  { label: 'CMV', value: 'CMV' },
-  { label: 'DO', value: 'DO' },
-  { label: 'DOF', value: 'DOF' },
-  { label: 'HR', value: 'HR' },
-  { label: 'LG', value: 'LG' },
-  { label: 'MOKO', value: 'MOKO' },
-  { label: 'MUTAN', value: 'MUTAN' },
-  { label: 'NFL', value: 'NFL' },
-  { label: 'OVAG', value: 'OVAG' },
-  { label: 'PD', value: 'PD' },
-  { label: 'TO', value: 'TO' },
-];
-
 // 🔥 Internal fields yang tidak ditampilkan sebagai identitas
-// Tambahkan 'catatanRevisi' untuk menyembunyikan catatan revisi
 const internalFields = [
   'id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName',
   'updatedAt', 'atasan_id', 'catatan_revisi', 'catatanRevisi', 'is_active'
@@ -157,9 +133,46 @@ const TambahDetailItem = () => {
   const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
 
+  // 🔥 State untuk menyimpan opsi dari dtb_option_values per field
+  const [optionsMap, setOptionsMap] = useState({});
+
   const lokasiMapRef = useRef({});
 
   const navigationState = location.state;
+
+  // 🔥 Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan detail_item_aktivitas_id
+  // Perbaikan: mendukung detail_item_aktivitas_id berbentuk array
+  const fetchOptionValues = async (detailItemAktivitasId) => {
+    try {
+      const dbRef = ref(database);
+      const snapshot = await get(child(dbRef, 'dtb_option_values'));
+      if (!snapshot.exists()) return [];
+
+      const data = snapshot.val();
+      const options = [];
+      for (const key in data) {
+        const item = data[key];
+        // Periksa apakah detail_item_aktivitas_id adalah array atau string
+        const id = item.detail_item_aktivitas_id;
+        const isMatch = Array.isArray(id)
+          ? id.includes(detailItemAktivitasId)
+          : id === detailItemAktivitasId;
+        if (isMatch && item.is_active !== false) {
+          options.push({
+            label: item.option_label,
+            value: item.option_value,
+            urutan: item.urutan || 0,
+          });
+        }
+      }
+      // Urutkan berdasarkan urutan
+      options.sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
+      return options;
+    } catch (error) {
+      console.error('Error fetching option values:', error);
+      return [];
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -365,6 +378,15 @@ const TambahDetailItem = () => {
       });
       setGroupedFields(grouped);
 
+      // 🔥 Ambil opsi untuk semua field select
+      const selectFields = foundDetails.filter(f => f.tipe_input === 'select');
+      const optionsMapTemp = {};
+      for (const field of selectFields) {
+        const opts = await fetchOptionValues(field.id_detail_item_aktivitas);
+        optionsMapTemp[field.id_detail_item_aktivitas] = opts;
+      }
+      setOptionsMap(optionsMapTemp);
+
       if (foundDetails.length > 0) {
         const newItem = createEmptyItem(foundDetails);
         const recalculatedItem = recalculateItem(newItem, foundDetails);
@@ -422,8 +444,8 @@ const TambahDetailItem = () => {
   const renderField = (field, value, index) => {
     const isRequired = field.is_required === true;
     const placeholder = field.placeholder || '';
-    const isLossesField = field.label === 'Losses' || field.nama_field === 'losses';
     const isCalculation = field.is_calculation === true;
+    const fieldValue = value !== undefined && value !== null ? String(value) : '';
 
     // 🔥 Style untuk label agar sesuai dengan warna AppBar (primary.main)
     const labelSx = {
@@ -440,7 +462,7 @@ const TambahDetailItem = () => {
         <TextField
           fullWidth
           label={field.label}
-          value={value || ''}
+          value={fieldValue}
           disabled
           variant="filled"
           size="small"
@@ -466,7 +488,7 @@ const TambahDetailItem = () => {
             fullWidth
             label={field.label}
             placeholder={placeholder}
-            value={value || ''}
+            value={fieldValue}
             onChange={(e) => handleItemValueChange(index, field.id_detail_item_aktivitas, e.target.value)}
             required={isRequired}
             size="small"
@@ -484,9 +506,10 @@ const TambahDetailItem = () => {
           <TextField
             fullWidth
             label={field.label}
-            type="number"
+            type="text"
+            inputMode="numeric"
             placeholder={placeholder}
-            value={value || ''}
+            value={fieldValue}
             onChange={(e) => handleItemValueChange(index, field.id_detail_item_aktivitas, e.target.value)}
             required={isRequired}
             size="small"
@@ -505,7 +528,7 @@ const TambahDetailItem = () => {
             fullWidth
             label={field.label}
             type="date"
-            value={value || ''}
+            value={fieldValue}
             onChange={(e) => handleItemValueChange(index, field.id_detail_item_aktivitas, e.target.value)}
             required={isRequired}
             size="small"
@@ -519,22 +542,22 @@ const TambahDetailItem = () => {
             }}
           />
         );
-      case 'select':
-        const selectOptions = isLossesField ? lossesOptions : [
-          { label: 'Opsi 1', value: 'option1' },
-          { label: 'Opsi 2', value: 'option2' },
-          { label: 'Opsi 3', value: 'option3' },
-        ];
+      case 'select': {
+        // 🔥 Ambil opsi dari optionsMap berdasarkan id field
+        const selectOptions = optionsMap[field.id_detail_item_aktivitas] || [];
         return (
           <Autocomplete
             fullWidth
             options={selectOptions}
             getOptionLabel={(option) => option.label || ''}
-            value={selectOptions.find(opt => opt.value === value) || null}
+            value={selectOptions.find(opt => opt.value === fieldValue) || null}
             onChange={(event, newValue) => {
               handleItemValueChange(index, field.id_detail_item_aktivitas, newValue ? newValue.value : '');
             }}
             size="small"
+            loading={selectOptions.length === 0}
+            loadingText="Memuat opsi..."
+            noOptionsText="Tidak ada opsi tersedia"
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -550,17 +573,23 @@ const TambahDetailItem = () => {
                 }}
               />
             )}
+            renderOption={(props, option) => (
+              <li {...props}>
+                <Typography variant="body2">{option.label}</Typography>
+              </li>
+            )}
             isOptionEqualToValue={(option, val) => option.value === val?.value}
             disablePortal
           />
         );
+      }
       default:
         return (
           <TextField
             fullWidth
             label={field.label}
             placeholder={placeholder}
-            value={value || ''}
+            value={fieldValue}
             onChange={(e) => handleItemValueChange(index, field.id_detail_item_aktivitas, e.target.value)}
             required={isRequired}
             size="small"
@@ -612,9 +641,21 @@ const TambahDetailItem = () => {
     }
   };
 
+  // 🔥 FUNGSI UPDATE STATUS IDENTITAS YANG DIPERBARUI
   const updateIdentitasStatus = async () => {
     try {
       const dbRef = ref(database);
+      // 1. Cek apakah daftar aktivitas ini memiliki field detail item
+      const detailFieldsSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
+      const detailFields = detailFieldsSnapshot.val();
+      let hasDetailFields = false;
+      if (detailFields) {
+        hasDetailFields = Object.values(detailFields).some(
+          f => f.daftar_aktivitas_id === daftarAktivitasId && f.is_active === true
+        );
+      }
+
+      // 2. Ambil semua item aktif untuk identitas ini
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
       const itemData = itemSnapshot.val();
       const activeItems = [];
@@ -627,35 +668,40 @@ const TambahDetailItem = () => {
         }
       }
 
-      if (activeItems.length === 0) return;
-
-      const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
-      const detailData = detailSnapshot.val();
-      const allHasDetail = activeItems.every(item => {
-        if (!detailData) return false;
-        for (const key in detailData) {
-          const detail = detailData[key];
-          if (detail.data_item_aktivitas_id === item.id && detail.is_active === true) {
-            return true;
-          }
-        }
-        return false;
-      });
-
+      // 3. Tentukan status baru
       let statusName = 'ongoing';
-      if (allHasDetail) {
-        statusName = 'draft';
+      if (activeItems.length > 0) {
+        if (hasDetailFields) {
+          // Jika ada detail fields, cek apakah semua item memiliki detail aktif
+          const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
+          const detailData = detailSnapshot.val();
+          const allHasDetail = activeItems.every(item => {
+            if (!detailData) return false;
+            for (const key in detailData) {
+              const detail = detailData[key];
+              if (detail.data_item_aktivitas_id === item.id && detail.is_active === true) {
+                return true;
+              }
+            }
+            return false;
+          });
+          if (allHasDetail) statusName = 'draft';
+        } else {
+          // Jika tidak ada detail fields, cukup ada item aktif => draft
+          statusName = 'draft';
+        }
       }
+
+      // 4. Update status identitas
       const statusId = await getStatusId(statusName);
-      if (!statusId) return;
-
-      const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
-      await update(identitasRef, {
-        status_aktivitas_id: statusId,
-        updated_at: new Date().toISOString(),
-      });
-
-      console.log(`✅ Status identitas diubah menjadi ${statusName} (${statusId})`);
+      if (statusId) {
+        const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
+        await update(identitasRef, {
+          status_aktivitas_id: statusId,
+          updated_at: new Date().toISOString(),
+        });
+        console.log(`✅ Status identitas diubah menjadi ${statusName} (${statusId})`);
+      }
     } catch (error) {
       console.error('Error updating identitas status:', error);
     }
@@ -862,10 +908,10 @@ const TambahDetailItem = () => {
                   Data Identitas
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {/* 🔥 Pengamat */}
+                  {/* Pembuat */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                      Pengamat
+                      Di Buat Oleh
                     </Typography>
                     <Typography variant="body2">
                       {pelakuName || '-'}

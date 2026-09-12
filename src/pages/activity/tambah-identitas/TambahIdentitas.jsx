@@ -26,10 +26,9 @@ import { database, ref, get, child, push, set } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
-import DatePickers from '../../../components/date-pickers/DatePickers';
 import dayjs from 'dayjs';
 
-// 🔥 Import untuk MobileDatePicker
+// Import untuk MobileDatePicker
 import { MobileDatePicker } from '@mui/x-date-pickers/MobileDatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -50,7 +49,23 @@ const getWeekNumber = (dateString) => {
   return '';
 };
 
-// 🔥 Opsi untuk field "Aktivitas"
+// Helper: konversi DD/MM/YYYY ke YYYY-MM-DD
+const convertDateToYYYYMMDD = (dateStr) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const year = parseInt(parts[2], 10);
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) {
+      return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+  return dateStr;
+};
+
+// Opsi untuk field "Aktivitas"
 const aktivitasOptions = [
   { label: 'Diseases Survey', value: 'Diseases Survey' },
   { label: 'Diseases Survey - Next 1', value: 'Diseases Survey - Next 1' },
@@ -71,6 +86,9 @@ const TambahIdentitas = () => {
   const [lokasiOptions, setLokasiOptions] = useState([]);
   const [loadingLokasi, setLoadingLokasi] = useState(false);
   const [savedDataIdentitasId, setSavedDataIdentitasId] = useState(null);
+
+  // State untuk menyimpan opsi dari dtb_option_values per field
+  const [optionsMap, setOptionsMap] = useState({});
 
   // State untuk dialog
   const [showItemDialog, setShowItemDialog] = useState(false);
@@ -94,46 +112,29 @@ const TambahIdentitas = () => {
     fetchIdentitasFields();
   }, [activityData]);
 
-  // 🔥 Isi tanggal pengamatan dan week jika ada dari navigationState
+  // Isi tanggal pengamatan dan week jika ada dari navigationState
   useEffect(() => {
     if (navigationState?.tanggalPengamatan && identitasFields.length > 0) {
       const tanggalField = identitasFields.find(
         f => f.label === 'Tanggal Pengamatan' || f.nama_identitas === 'tanggal_pengamatan'
       );
       if (tanggalField) {
-        console.log('🔥 Mengisi tanggal pengamatan dari useEffect:', navigationState.tanggalPengamatan);
-        const dateStr = navigationState.tanggalPengamatan;
-        // Cek validasi format DD/MM/YYYY
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-          const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            // Konversi ke YYYY-MM-DD untuk DatePickers
-            const formattedDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const updates = {
-              [tanggalField.id_identitas_aktivitas]: formattedDate,
-            };
-            // Cari field week dan isi otomatis
-            const weekField = identitasFields.find(
-              f => f.label === 'Week Pengamatan' || f.nama_identitas === 'week_pengamatan'
-            );
-            if (weekField) {
-              const weekNumber = getWeekNumber(dateStr);
-              if (weekNumber) {
-                updates[weekField.id_identitas_aktivitas] = String(weekNumber);
-                console.log('📅 Week Pengamatan otomatis diisi:', weekNumber);
-              }
+        const dateStr = navigationState.tanggalPengamatan; // format DD/MM/YYYY
+        const formattedDate = convertDateToYYYYMMDD(dateStr); // konversi ke YYYY-MM-DD
+        if (formattedDate) {
+          const updates = {
+            [tanggalField.id_identitas_aktivitas]: formattedDate,
+          };
+          const weekField = identitasFields.find(
+            f => f.label === 'Week Pengamatan' || f.nama_identitas === 'week_pengamatan'
+          );
+          if (weekField) {
+            const weekNumber = getWeekNumber(dateStr);
+            if (weekNumber) {
+              updates[weekField.id_identitas_aktivitas] = String(weekNumber);
             }
-            setFormValues(prev => ({
-              ...prev,
-              ...updates,
-            }));
-          } else {
-            console.warn('⚠️ Tanggal tidak valid:', navigationState.tanggalPengamatan);
           }
+          setFormValues(prev => ({ ...prev, ...updates }));
         }
       }
     }
@@ -164,6 +165,58 @@ const TambahIdentitas = () => {
       }
     }
   }, [lokasiOptions, lokasiTerpilih, identitasFields]);
+
+  // 🔥 Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan identitas_aktivitas_id
+  const fetchOptionValues = async (identitasAktivitasId) => {
+    try {
+      const dbRef = ref(database);
+      const snapshot = await get(child(dbRef, 'dtb_option_values'));
+      if (!snapshot.exists()) return [];
+
+      const data = snapshot.val();
+      const options = [];
+      for (const key in data) {
+        const item = data[key];
+        const id = item.identitas_aktivitas_id;
+        const isMatch = Array.isArray(id)
+          ? id.includes(identitasAktivitasId)
+          : id === identitasAktivitasId;
+        if (isMatch && item.is_active !== false) {
+          options.push({
+            label: item.option_label,
+            value: item.option_value,
+            urutan: item.urutan || 0,
+          });
+        }
+      }
+      options.sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
+      return options;
+    } catch (error) {
+      console.error('Error fetching option values:', error);
+      return [];
+    }
+  };
+
+  // 🔥 Fungsi untuk mengecek assignment user
+  const checkUserAssignment = async (daftarAktivitasId, uid) => {
+    try {
+      const dbRef = ref(database);
+      const snapshot = await get(child(dbRef, 'dtb_workflow_approval_assignment'));
+      if (!snapshot.exists()) return false;
+
+      const data = snapshot.val();
+      for (const key in data) {
+        const item = data[key];
+        if (item.daftar_aktivitas_id === daftarAktivitasId && item.uid === uid && item.is_active !== false) {
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking assignment:', error);
+      return false;
+    }
+  };
 
   const fetchIdentitasFields = async () => {
     setLoading(true);
@@ -206,6 +259,22 @@ const TambahIdentitas = () => {
             initialValues[field.id_identitas_aktivitas] = '';
           });
           setFormValues(initialValues);
+
+          // Ambil opsi untuk semua field select (kecuali yang ditangani khusus)
+          const selectFields = filteredIdentitas.filter(
+            f => f.tipe_input === 'select' &&
+            f.label !== 'Lokasi' &&
+            f.nama_identitas !== 'lokasi' &&
+            f.label !== 'Aktivitas' &&
+            f.nama_identitas !== 'aktivitas'
+          );
+
+          const optionsMapTemp = {};
+          for (const field of selectFields) {
+            const opts = await fetchOptionValues(field.id_identitas_aktivitas);
+            optionsMapTemp[field.id_identitas_aktivitas] = opts;
+          }
+          setOptionsMap(optionsMapTemp);
         }
       } else {
         setError('Tidak ada daftar aktivitas yang tersedia untuk aktivitas ini');
@@ -222,7 +291,6 @@ const TambahIdentitas = () => {
     setLoadingLokasi(true);
     try {
       const dbRef = ref(database);
-
       const filterSnapshot = await get(child(dbRef, 'dtb_filter_lokasi_aktivitas'));
       const filterData = filterSnapshot.val();
 
@@ -270,58 +338,13 @@ const TambahIdentitas = () => {
     }
   };
 
-  // ========== FUNGSI UNTUK WORKFLOW APPROVAL ==========
-  const getWorkflowApproval = async (daftarAktivitasId) => {
-    try {
-      const dbRef = ref(database);
-      const workflowSnapshot = await get(child(dbRef, 'dtb_workflow_approval'));
-      const workflowData = workflowSnapshot.val();
-      if (!workflowData) return { workflowId: '', stepId: '' };
-
-      // Cari workflow yang aktif dan sesuai daftar_aktivitas_id
-      let workflowId = '';
-      for (const key in workflowData) {
-        const wf = workflowData[key];
-        if (wf.daftar_aktivitas_id === daftarAktivitasId && wf.is_active === true) {
-          workflowId = wf.id_workflow_approval;
-          break;
-        }
-      }
-      if (!workflowId) return { workflowId: '', stepId: '' };
-
-      // Ambil step pertama (urutan terkecil) yang aktif
-      const stepSnapshot = await get(child(dbRef, 'dtb_workflow_approval_steps'));
-      const stepData = stepSnapshot.val();
-      if (!stepData) return { workflowId, stepId: '' };
-
-      let firstStepId = '';
-      let minUrutan = Infinity;
-      for (const key in stepData) {
-        const step = stepData[key];
-        if (step.workflow_approval_id === workflowId && step.is_active === true) {
-          if (step.urutan < minUrutan) {
-            minUrutan = step.urutan;
-            firstStepId = step.id_workflow_approval_steps;
-          }
-        }
-      }
-      return { workflowId, stepId: firstStepId };
-    } catch (error) {
-      console.error('Error fetching workflow approval:', error);
-      return { workflowId: '', stepId: '' };
-    }
-  };
-  // ===================================================
-
   // Fungsi untuk mendapatkan status id dari nama status
   const getStatusId = async (statusName) => {
     try {
       const dbRef = ref(database);
       const statusSnapshot = await get(child(dbRef, 'dtb_status_aktivitas'));
       const statusData = statusSnapshot.val();
-
       if (!statusData) return '';
-
       for (const key in statusData) {
         if (statusData[key].nama_status === statusName) {
           return statusData[key].id_status_aktivitas;
@@ -341,35 +364,36 @@ const TambahIdentitas = () => {
     }));
   };
 
-  const handleTanggalPengamatanChange = (fieldId, value) => {
-    console.log('📅 handleTanggalPengamatanChange called with value:', value);
-    // value dari MobileDatePicker adalah dayjs object atau null
+  // 🔥 Handler untuk semua field date (tidak hanya Tanggal Pengamatan)
+  const handleDateChange = (fieldId, value, field) => {
     let formattedValue = '';
     let dateStrForWeek = '';
-    
     if (value && value.isValid()) {
-      // Format ke YYYY-MM-DD untuk disimpan
       formattedValue = value.format('YYYY-MM-DD');
-      // Format ke DD/MM/YYYY untuk perhitungan week
       dateStrForWeek = value.format('DD/MM/YYYY');
     }
 
     setFormValues(prev => {
       const newValues = { ...prev, [fieldId]: formattedValue };
-      const weekField = identitasFields.find(
-        f => f.label === 'Week Pengamatan' || f.nama_identitas === 'week_pengamatan'
-      );
-      if (weekField && dateStrForWeek) {
-        const weekNumber = getWeekNumber(dateStrForWeek);
-        if (weekNumber) {
-          newValues[weekField.id_identitas_aktivitas] = String(weekNumber);
-          console.log('✅ Week Pengamatan diisi:', weekNumber);
-        } else {
+      
+      // Jika field ini adalah tanggal pengamatan, update Week Pengamatan otomatis
+      const isTanggalPengamatan = field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan';
+      if (isTanggalPengamatan) {
+        const weekField = identitasFields.find(
+          f => f.label === 'Week Pengamatan' || f.nama_identitas === 'week_pengamatan'
+        );
+        if (weekField && dateStrForWeek) {
+          const weekNumber = getWeekNumber(dateStrForWeek);
+          if (weekNumber) {
+            newValues[weekField.id_identitas_aktivitas] = String(weekNumber);
+          } else {
+            newValues[weekField.id_identitas_aktivitas] = '';
+          }
+        } else if (weekField) {
           newValues[weekField.id_identitas_aktivitas] = '';
         }
-      } else if (weekField) {
-        newValues[weekField.id_identitas_aktivitas] = '';
       }
+      
       return newValues;
     });
   };
@@ -382,30 +406,24 @@ const TambahIdentitas = () => {
   const renderInputField = (field) => {
     const value = formValues[field.id_identitas_aktivitas] || '';
     const isRequired = field.is_required === true;
-    const isTanggalPengamatan = field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan';
+    // 🔥 Gunakan tipe_input date untuk semua field tanggal, bukan hanya hardcoded
+    const isDateField = field.tipe_input === 'date';
 
-    if (isTanggalPengamatan) {
-      // 🔥 Gunakan MobileDatePicker dengan slide-up dari bawah
-      // Lebar dialog menyesuaikan dengan area konten (max-width: sm)
-      // 🔥 Tidak bisa memilih tanggal di masa depan (disableFuture)
-      // 🔥 Mencegah close saat klik backdrop (disableCloseOnBackdropClick)
+    if (isDateField) {
       return (
         <LocalizationProvider dateAdapter={AdapterDayjs}>
           <MobileDatePicker
             label={field.label}
             value={value ? dayjs(value) : null}
-            onChange={(newValue) => handleTanggalPengamatanChange(field.id_identitas_aktivitas, newValue)}
+            onChange={(newValue) => handleDateChange(field.id_identitas_aktivitas, newValue, field)}
             format="DD/MM/YYYY"
-            disableFuture // 🔥 Mencegah pemilihan tanggal di masa depan
+            disableFuture
             slotProps={{
               textField: {
                 fullWidth: true,
                 required: isRequired,
                 size: 'medium',
-                sx: { 
-                  mt: 1, 
-                  '& .MuiOutlinedInput-root': { borderRadius: '4px' } 
-                }
+                sx: { mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }
               },
               dialog: {
                 sx: {
@@ -429,10 +447,9 @@ const TambahIdentitas = () => {
                   '& .MuiBackdrop-root': {
                     backgroundColor: 'rgba(0, 0, 0, 0.5)',
                   },
-                  // 🔥 Mencegah close saat klik backdrop
                   '& .MuiDialog-root': {
                     '& .MuiBackdrop-root': {
-                      pointerEvents: 'none', // Mencegah klik pada backdrop
+                      pointerEvents: 'none',
                     }
                   }
                 }
@@ -441,9 +458,7 @@ const TambahIdentitas = () => {
                 sx: {
                   backgroundColor: (theme) => theme.palette.primary.main,
                   color: 'white',
-                  '& .MuiTypography-root': {
-                    color: 'white',
-                  },
+                  '& .MuiTypography-root': { color: 'white' },
                 }
               },
               actionBar: {
@@ -456,19 +471,9 @@ const TambahIdentitas = () => {
             }}
             closeOnSelect={false}
             views={['year', 'month', 'day']}
-            // 🔥 Mencegah close saat klik backdrop
             onClose={(reason) => {
-              // Hanya izinkan close jika reason adalah 'cancel' atau 'accept'
-              // Selain itu (seperti 'backdropClick') akan diabaikan
-              if (reason === 'cancel' || reason === 'accept') {
-                return;
-              }
-              // Jika reason adalah 'escape' (tombol ESC), kita biarkan
-              if (reason === 'escape') {
-                return;
-              }
-              // Untuk reason lainnya (termasuk backdropClick), kita cegah
-              // dengan mengembalikan false
+              if (reason === 'cancel' || reason === 'accept') return;
+              if (reason === 'escape') return;
               return false;
             }}
           />
@@ -505,21 +510,7 @@ const TambahIdentitas = () => {
             sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
           />
         );
-      case 'date':
-        return (
-          <TextField
-            fullWidth
-            label={field.label}
-            type="date"
-            value={value}
-            onChange={(e) => onChangeHandler(field.id_identitas_aktivitas, e.target.value)}
-            required={isRequired}
-            size="medium"
-            InputLabelProps={{ shrink: true }}
-            sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
-          />
-        );
-      case 'select':
+      case 'select': {
         const isLokasiField = field.label === 'Lokasi' || field.nama_identitas === 'lokasi';
         const isAktivitasField = field.label === 'Aktivitas' || field.nama_identitas === 'aktivitas';
 
@@ -536,12 +527,7 @@ const TambahIdentitas = () => {
               size="medium"
               sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
               renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={field.label}
-                  required={isRequired}
-                  size="medium"
-                />
+                <TextField {...params} label={field.label} required={isRequired} size="medium" />
               )}
               renderOption={(props, option) => (
                 <li {...props}>
@@ -571,12 +557,7 @@ const TambahIdentitas = () => {
               noOptionsText="Tidak ada lokasi yang tersedia"
               sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
               renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={field.label}
-                  required={isRequired}
-                  size="medium"
-                />
+                <TextField {...params} label={field.label} required={isRequired} size="medium" />
               )}
               renderOption={(props, option) => (
                 <li {...props}>
@@ -592,35 +573,36 @@ const TambahIdentitas = () => {
           );
         }
 
-        const selectOptions = [
-          { label: 'Opsi 1', value: 'option1' },
-          { label: 'Opsi 2', value: 'option2' },
-          { label: 'Opsi 3', value: 'option3' },
-        ];
+        // Field select lainnya
+        const fieldOptions = optionsMap[field.id_identitas_aktivitas] || [];
         return (
           <Autocomplete
             fullWidth
-            options={selectOptions}
+            options={fieldOptions}
             getOptionLabel={(option) => option.label || ''}
-            value={selectOptions.find(opt => opt.value === value) || null}
+            value={fieldOptions.find(opt => opt.value === value) || null}
             onChange={(event, newValue) => {
               handleInputChange(field.id_identitas_aktivitas, newValue ? newValue.value : '');
             }}
             size="medium"
+            loading={fieldOptions.length === 0}
+            loadingText="Memuat opsi..."
+            noOptionsText="Tidak ada opsi tersedia"
             sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: '4px' } }}
             renderInput={(params) => (
-              <TextField
-                {...params}
-                label={field.label}
-                required={isRequired}
-                size="medium"
-              />
+              <TextField {...params} label={field.label} required={isRequired} size="medium" />
+            )}
+            renderOption={(props, option) => (
+              <li {...props}>
+                <Typography variant="body2">{option.label}</Typography>
+              </li>
             )}
             isOptionEqualToValue={(option, val) => option.value === val?.value}
             disablePortal
             clearOnEscape
           />
         );
+      }
       case 'radio':
         return (
           <FormControl component="fieldset" sx={{ mt: 1 }}>
@@ -651,33 +633,43 @@ const TambahIdentitas = () => {
 
   // ===================== SAVE DATA =====================
   const saveIdentitasData = async () => {
-    // Validasi required fields
+    // Validasi wajib diisi
     const emptyFields = identitasFields.filter(
       field => field.is_required && !formValues[field.id_identitas_aktivitas]
     );
-
     if (emptyFields.length > 0) {
       setError(`Mohon isi field yang wajib: ${emptyFields.map(f => f.label).join(', ')}`);
       return null;
     }
 
+    // 🔥 Cek assignment user
+    const uid = userData?.uid || '';
+    if (!uid) {
+      setError('User tidak terautentikasi.');
+      return null;
+    }
+
+    const daftarId = selectedDaftarAktivitas?.id_daftar_aktivitas;
+    if (!daftarId) {
+      setError('Daftar aktivitas tidak ditemukan.');
+      return null;
+    }
+
+    const hasAssignment = await checkUserAssignment(daftarId, uid);
+    if (!hasAssignment) {
+      setError('Anda tidak memiliki penugasan untuk membuat data pada daftar aktivitas ini.');
+      return null;
+    }
+
     try {
-      // 🔥 Ambil workflow approval untuk daftar aktivitas ini
-      const { workflowId, stepId } = await getWorkflowApproval(selectedDaftarAktivitas?.id_daftar_aktivitas);
-
-      // Get status 'ongoing'
       const statusOngoingId = await getStatusId('ongoing');
-
-      // Cek field Catatan
       const catatanField = identitasFields.find(f => f.label === 'Catatan' || f.nama_identitas === 'catatan');
       let statusId = statusOngoingId;
       if (catatanField) {
         const catatanValue = formValues[catatanField.id_identitas_aktivitas];
         if (catatanValue && catatanValue.trim() !== '') {
           const draftStatusId = await getStatusId('draft');
-          if (draftStatusId) {
-            statusId = draftStatusId;
-          }
+          if (draftStatusId) statusId = draftStatusId;
         }
       }
 
@@ -685,15 +677,14 @@ const TambahIdentitas = () => {
       const newDataRefPush = push(newDataRef);
       const dataIdentitasId = newDataRefPush.key;
 
-      // === OBJEK DATA BARU (tanpa atasan_id dan catatan_revisi) ===
+      // 🔥 Tidak mengisi current_workflow_approval_id dan current_workflow_approval_steps_id
       const newData = {
         id_data_identitas_aktivitas: dataIdentitasId,
-        pelaku_id: userData?.uid || '',
-        daftar_aktivitas_id: selectedDaftarAktivitas?.id_daftar_aktivitas || '',
+        pelaku_id: uid,
+        daftar_aktivitas_id: daftarId,
         status_aktivitas_id: statusId,
-        // Field baru:
-        current_workflow_approval_id: workflowId || '',
-        current_workflow_approval_steps_id: stepId || '',
+        current_workflow_approval_id: '',      // kosong, akan diisi saat kirim
+        current_workflow_approval_steps_id: '', // kosong
         status_approval: '',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -708,9 +699,11 @@ const TambahIdentitas = () => {
         const value = formValues[field.id_identitas_aktivitas];
         if (value) {
           let valueText = value;
-          // Jika field adalah tanggal pengamatan dan value dalam format YYYY-MM-DD, ubah ke DD/MM/YYYY
-          const isTanggal = field.label === 'Tanggal Pengamatan' || field.nama_identitas === 'tanggal_pengamatan';
-          if (isTanggal && typeof value === 'string' && value.includes('-')) {
+          // Konversi tanggal (semua field dengan tipe_input 'date' atau 'Tanggal Pengamatan') ke DD/MM/YYYY
+          const isDateField = field.tipe_input === 'date' || 
+                              field.label === 'Tanggal Pengamatan' || 
+                              field.nama_identitas === 'tanggal_pengamatan';
+          if (isDateField && typeof value === 'string' && value.includes('-')) {
             const parts = value.split('-');
             if (parts.length === 3) {
               valueText = `${parts[2]}/${parts[1]}/${parts[0]}`;
@@ -744,7 +737,6 @@ const TambahIdentitas = () => {
 
     try {
       const dataIdentitasId = await saveIdentitasData();
-
       if (!dataIdentitasId) {
         setSaving(false);
         return;
@@ -777,7 +769,6 @@ const TambahIdentitas = () => {
           });
         }, 1500);
       }
-
     } catch (error) {
       console.error('Error saving data:', error);
       setError('Gagal menyimpan data identitas');
@@ -786,7 +777,7 @@ const TambahIdentitas = () => {
     }
   };
 
-  // Handler untuk dialog - Ya (lanjut ke Tambah Item)
+  // Handler untuk dialog
   const handleDialogConfirm = () => {
     setShowItemDialog(false);
     navigate('/tambah-item', {
@@ -938,15 +929,10 @@ const TambahIdentitas = () => {
         </Alert>
       </Snackbar>
 
-      {/* 🔥 CSS Animasi untuk slide up */}
       <style jsx>{`
         @keyframes slideUp {
-          from {
-            transform: translateX(-50%) translateY(100%);
-          }
-          to {
-            transform: translateX(-50%) translateY(0);
-          }
+          from { transform: translateX(-50%) translateY(100%); }
+          to { transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </Box>

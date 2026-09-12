@@ -73,10 +73,14 @@ const DataDetailItem = () => {
   const [dataIdentitasId, setDataIdentitasId] = useState(null);
   const [daftarAktivitasId, setDaftarAktivitasId] = useState(null);
   const [aktivitasId, setAktivitasId] = useState(null);
-  const [jabatanName, setJabatanName] = useState('');
   const [pelakuId, setPelakuId] = useState(null);
   const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
+
+  // 🔥 State untuk izin dari dtb_daftar_aktivitas
+  const [isAllowedByDaftar, setIsAllowedByDaftar] = useState(false);
+  const [userRoleIds, setUserRoleIds] = useState([]);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedDetailId, setSelectedDetailId] = useState(null);
@@ -86,23 +90,97 @@ const DataDetailItem = () => {
 
   const navigationState = location.state;
 
-  // Ambil nama jabatan dari database berdasarkan id_jabatan user
+  // ===== Ambil role user (ID) =====
+  const fetchUserRoles = async () => {
+    try {
+      const dbRef = ref(database);
+      const uid = userData?.uid;
+      if (!uid) return [];
+
+      const userRolesSnapshot = await get(child(dbRef, 'user_roles'));
+      const userRolesData = userRolesSnapshot.val();
+      if (!userRolesData) return [];
+
+      const userRoleKeys = Object.keys(userRolesData).filter(
+        key => userRolesData[key].uid === uid
+      );
+      if (userRoleKeys.length === 0) return [];
+
+      return userRoleKeys.map(key => userRolesData[key].id_role);
+    } catch (error) {
+      console.error('Error fetching user roles:', error);
+      return [];
+    }
+  };
+
+  // ===== Cek izin berdasarkan posisi dan role (AND) =====
+  const checkUserAllowed = (allowedPositions, allowedRoles) => {
+    if (!allowedPositions || !allowedRoles) return false;
+
+    // Konversi ke array jika masih object
+    let positions = allowedPositions;
+    let roles = allowedRoles;
+    if (positions && typeof positions === 'object' && !Array.isArray(positions)) {
+      positions = Object.values(positions);
+    }
+    if (roles && typeof roles === 'object' && !Array.isArray(roles)) {
+      roles = Object.values(roles);
+    }
+
+    positions = Array.isArray(positions) ? positions : [];
+    roles = Array.isArray(roles) ? roles : [];
+
+    const positionMatch = userData?.id_jabatan && positions.includes(userData.id_jabatan);
+    const roleMatch = userRoleIds.some(roleId => roles.includes(roleId));
+
+    return positionMatch && roleMatch;
+  };
+
+  // ===== Ambil data daftar aktivitas untuk cek izin =====
+  const fetchDaftarAktivitas = async (daftarId) => {
+    try {
+      const dbRef = ref(database);
+      const daftarSnapshot = await get(child(dbRef, 'dtb_daftar_aktivitas'));
+      const daftarData = daftarSnapshot.val();
+      if (!daftarData) return null;
+
+      const daftarList = Object.values(daftarData);
+      const found = daftarList.find(
+        item => item.id_daftar_aktivitas === daftarId && item.is_active === true
+      );
+      return found || null;
+    } catch (error) {
+      console.error('Error fetching daftar aktivitas:', error);
+      return null;
+    }
+  };
+
+  // Ambil role user
   useEffect(() => {
-    const fetchJabatan = async () => {
-      if (!userData?.id_jabatan) return;
-      try {
-        const dbRef = ref(database);
-        const jabatanRef = child(dbRef, `u_position/${userData.id_jabatan}`);
-        const snapshot = await get(jabatanRef);
-        if (snapshot.exists()) {
-          setJabatanName(snapshot.val().nama_jabatan || '');
-        }
-      } catch (err) {
-        console.error('Error fetching jabatan:', err);
+    const getRoles = async () => {
+      const roleIds = await fetchUserRoles();
+      setUserRoleIds(roleIds);
+      setRolesLoaded(true);
+    };
+    getRoles();
+  }, [userData]);
+
+  // Cek izin setelah role dan daftar aktivitas id tersedia
+  useEffect(() => {
+    if (!rolesLoaded || !daftarAktivitasId) return;
+
+    const checkPermission = async () => {
+      const daftar = await fetchDaftarAktivitas(daftarAktivitasId);
+      if (daftar) {
+        const allowed = checkUserAllowed(daftar.allowed_by_position, daftar.allowed_by_role);
+        setIsAllowedByDaftar(allowed);
+        console.log('🔍 DataDetailItem -> isAllowedByDaftar:', allowed);
+      } else {
+        setIsAllowedByDaftar(false);
       }
     };
-    fetchJabatan();
-  }, [userData]);
+    checkPermission();
+  }, [rolesLoaded, daftarAktivitasId, userRoleIds, userData?.id_jabatan]);
 
   useEffect(() => {
     if (!navigationState || !navigationState.dataItemId) {
@@ -356,11 +434,13 @@ const DataDetailItem = () => {
     });
   };
 
-  // 🔥 LOGIKA AKSES
-  const isPengamat = jabatanName === 'Pengamat';
-  const isEditable = isPengamat && ['draft', 'ongoing', 'rejected'].includes(statusName);
-  const isAddable = isPengamat && ['draft', 'ongoing', 'rejected'].includes(statusName);
-  const isOwnData = isPengamat ? pelakuId === userData?.uid : true;
+  // ============================================================
+  // LOGIKA AKSES (hanya berdasarkan allowed_by_position & allowed_by_role)
+  // ============================================================
+  const isAllowed = isAllowedByDaftar;
+  const isAddable = isAllowed && ['draft', 'ongoing', 'rejected'].includes(statusName);
+  const isEditable = isAddable;
+  const isOwnData = isAllowed ? pelakuId === userData?.uid : true;
 
   // 🔥 Fungsi untuk merender satu item dengan group sesuai urutan
   const renderGroupedFieldsForItem = (item, index) => {
@@ -506,8 +586,8 @@ const DataDetailItem = () => {
     );
   }
 
-  // 🔥 CEK AKSES: Jika Pengamat dan data bukan milik sendiri
-  if (isPengamat && !isOwnData) {
+  // 🔥 CEK AKSES: Jika user diizinkan tetapi data bukan milik sendiri
+  if (isAllowed && !isOwnData) {
     return (
       <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pt: 0, pb: 10 }}>
         <AppBar title="Data Detail Item" showBackButton onBackClick={handleBack} showLogout={false} />
@@ -571,10 +651,10 @@ const DataDetailItem = () => {
                   Data Identitas
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {/* 🔥 Pengamat */}
+                  {/* Pembuat */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                      Pengamat
+                      Di Buat Oleh
                     </Typography>
                     <Typography variant="body2">
                       {pelakuName || '-'}

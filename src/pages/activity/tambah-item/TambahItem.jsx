@@ -11,45 +11,26 @@ import {
   IconButton,
   CircularProgress,
   Divider,
-  Chip,
   Alert,
   Snackbar,
   Card,
   CardContent,
   Autocomplete,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   Save as SaveIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { database, ref, get, child, push, set, update } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
-
-// Opsi untuk field Losses
-const lossesOptions = [
-  { label: 'ABNDN', value: 'ABNDN' },
-  { label: 'ABNRL', value: 'ABNRL' },
-  { label: 'BD', value: 'BD' },
-  { label: 'BNECK', value: 'BNECK' },
-  { label: 'BRMXL', value: 'BRMXL' },
-  { label: 'BSV', value: 'BSV' },
-  { label: 'BT', value: 'BT' },
-  { label: 'CMV', value: 'CMV' },
-  { label: 'DO', value: 'DO' },
-  { label: 'DOF', value: 'DOF' },
-  { label: 'HR', value: 'HR' },
-  { label: 'LG', value: 'LG' },
-  { label: 'MOKO', value: 'MOKO' },
-  { label: 'MUTAN', value: 'MUTAN' },
-  { label: 'NFL', value: 'NFL' },
-  { label: 'OVAG', value: 'OVAG' },
-  { label: 'PD', value: 'PD' },
-  { label: 'TO', value: 'TO' },
-];
 
 // Fungsi untuk mendapatkan warna status (sama seperti di DataIdentitas)
 const getStatusColor = (statusName) => {
@@ -71,6 +52,8 @@ const TambahItem = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [itemFields, setItemFields] = useState([]);
+  const [groupedFields, setGroupedFields] = useState({});
+  const [groupData, setGroupData] = useState({});
   const [dataIdentitasId, setDataIdentitasId] = useState(null);
   const [daftarAktivitasId, setDaftarAktivitasId] = useState(null);
   const [activityData, setActivityData] = useState(null);
@@ -83,8 +66,11 @@ const TambahItem = () => {
 
   // 🔥 State untuk pelakuId, pelakuName, dan statusName
   const [pelakuId, setPelakuId] = useState(null);
-  const [pelakuName, setPelakuName] = useState(''); // <-- tambahan
+  const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
+
+  // 🔥 State untuk menyimpan opsi dari dtb_option_values per field
+  const [optionsMap, setOptionsMap] = useState({});
 
   const lokasiMapRef = useRef({});
 
@@ -95,6 +81,37 @@ const TambahItem = () => {
   const [tempDataItemId, setTempDataItemId] = useState(null);
 
   const navigationState = location.state;
+
+  // 🔥 Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan item_aktivitas_id
+  const fetchOptionValues = async (itemAktivitasId) => {
+    try {
+      const dbRef = ref(database);
+      const snapshot = await get(child(dbRef, 'dtb_option_values'));
+      if (!snapshot.exists()) return [];
+      
+      const data = snapshot.val();
+      const options = [];
+      for (const key in data) {
+        const item = data[key];
+        const id = item.item_aktivitas_id;
+        const isMatch = Array.isArray(id)
+          ? id.includes(itemAktivitasId)
+          : id === itemAktivitasId;
+        if (isMatch && item.is_active !== false) {
+          options.push({
+            label: item.option_label,
+            value: item.option_value,
+            urutan: item.urutan || 0,
+          });
+        }
+      }
+      options.sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
+      return options;
+    } catch (error) {
+      console.error('Error fetching option values:', error);
+      return [];
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -108,7 +125,6 @@ const TambahItem = () => {
       setDaftarAktivitasId(navigationState.daftarAktivitasId);
       setActivityData(navigationState.aktivitasData);
 
-      // 🔥 Ambil pelakuId dan statusName dari navigationState
       const finalPelakuId =
         navigationState.pelakuId ||
         navigationState.identitasValues?.pelakuId ||
@@ -121,7 +137,6 @@ const TambahItem = () => {
         '';
       setStatusName(finalStatusName);
 
-      // 🔥 Ambil pelakuName dari navigationState (jika ada) atau fetch dari database
       const pelakuNameFromState = navigationState.pelakuName || '';
       if (pelakuNameFromState) {
         setPelakuName(pelakuNameFromState);
@@ -248,7 +263,48 @@ const TambahItem = () => {
         .sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
 
       setItemFields(foundItems);
-      
+
+      // 🔥 Ambil data group dari dtb_group_item_aktivitas
+      const groupSnapshot = await get(child(dbRef, 'dtb_group_item_aktivitas'));
+      const groupData = groupSnapshot.val();
+      const groupMap = {};
+      if (groupData) {
+        const groupList = Object.values(groupData);
+        const filteredGroups = groupList.filter(
+          g => g.daftar_aktivitas_id === daftarId && g.is_active === true
+        );
+        filteredGroups.forEach(g => {
+          groupMap[g.id_group_item_aktivitas] = g;
+        });
+      }
+      setGroupData(groupMap);
+
+      // 🔥 Kelompokkan field berdasarkan group_item_aktivitas_id
+      const grouped = {};
+      const ungrouped = [];
+      foundItems.forEach(field => {
+        const groupId = field.group_item_aktivitas_id || '';
+        if (groupId && groupId !== '') {
+          if (!grouped[groupId]) grouped[groupId] = [];
+          grouped[groupId].push(field);
+        } else {
+          ungrouped.push(field);
+        }
+      });
+      Object.keys(grouped).forEach(key => {
+        grouped[key].sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
+      });
+      setGroupedFields(grouped);
+
+      // 🔥 Ambil opsi untuk semua field select
+      const selectFields = foundItems.filter(f => f.tipe_input === 'select');
+      const optionsMapTemp = {};
+      for (const field of selectFields) {
+        const opts = await fetchOptionValues(field.id_item_aktivitas);
+        optionsMapTemp[field.id_item_aktivitas] = opts;
+      }
+      setOptionsMap(optionsMapTemp);
+
       if (foundItems.length > 0) {
         setItems([createEmptyItem(foundItems)]);
       } else {
@@ -299,7 +355,16 @@ const TambahItem = () => {
     const isRequired = field.is_required === true;
     const placeholder = field.placeholder || '';
     const fieldValue = value !== undefined && value !== null ? String(value) : '';
-    const isLossesField = field.label === 'Losses' || field.nama_field === 'losses';
+
+    // 🔥 Style label primary
+    const labelSx = {
+      '& .MuiInputLabel-root': {
+        color: 'primary.main',
+      },
+      '& .MuiInputLabel-root.Mui-focused': {
+        color: 'primary.main',
+      },
+    };
 
     switch (field.tipe_input) {
       case 'text':
@@ -313,11 +378,10 @@ const TambahItem = () => {
             required={isRequired}
             size="small"
             sx={{
+              ...labelSx,
               '& .MuiOutlinedInput-root': {
                 borderRadius: '4px',
-                '& fieldset': {
-                  borderRadius: '4px',
-                },
+                '& fieldset': { borderRadius: '4px' },
               },
             }}
           />
@@ -335,11 +399,10 @@ const TambahItem = () => {
             required={isRequired}
             size="small"
             sx={{
+              ...labelSx,
               '& .MuiOutlinedInput-root': {
                 borderRadius: '4px',
-                '& fieldset': {
-                  borderRadius: '4px',
-                },
+                '& fieldset': { borderRadius: '4px' },
               },
             }}
           />
@@ -356,21 +419,16 @@ const TambahItem = () => {
             size="small"
             InputLabelProps={{ shrink: true }}
             sx={{
+              ...labelSx,
               '& .MuiOutlinedInput-root': {
                 borderRadius: '4px',
-                '& fieldset': {
-                  borderRadius: '4px',
-                },
+                '& fieldset': { borderRadius: '4px' },
               },
             }}
           />
         );
-      case 'select':
-        const selectOptions = isLossesField ? lossesOptions : [
-          { label: 'Opsi 1', value: 'option1' },
-          { label: 'Opsi 2', value: 'option2' },
-          { label: 'Opsi 3', value: 'option3' },
-        ];
+      case 'select': {
+        const selectOptions = optionsMap[field.id_item_aktivitas] || [];
         return (
           <Autocomplete
             fullWidth
@@ -381,6 +439,9 @@ const TambahItem = () => {
               handleItemValueChange(index, field.id_item_aktivitas, newValue ? newValue.value : '');
             }}
             size="small"
+            loading={selectOptions.length === 0}
+            loadingText="Memuat opsi..."
+            noOptionsText="Tidak ada opsi tersedia"
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -388,19 +449,24 @@ const TambahItem = () => {
                 placeholder={placeholder}
                 required={isRequired}
                 sx={{
+                  ...labelSx,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: '4px',
-                    '& fieldset': {
-                      borderRadius: '4px',
-                    },
+                    '& fieldset': { borderRadius: '4px' },
                   },
                 }}
               />
+            )}
+            renderOption={(props, option) => (
+              <li {...props}>
+                <Typography variant="body2">{option.label}</Typography>
+              </li>
             )}
             isOptionEqualToValue={(option, val) => option.value === val?.value}
             disablePortal
           />
         );
+      }
       default:
         return (
           <TextField
@@ -412,16 +478,111 @@ const TambahItem = () => {
             required={isRequired}
             size="small"
             sx={{
+              ...labelSx,
               '& .MuiOutlinedInput-root': {
                 borderRadius: '4px',
-                '& fieldset': {
-                  borderRadius: '4px',
-                },
+                '& fieldset': { borderRadius: '4px' },
               },
             }}
           />
         );
     }
+  };
+
+  // 🔥 Fungsi render dengan grouping (sama persis dengan di TambahDetailItem)
+  const renderGroupedFields = (item, index) => {
+    const renderItems = [];
+
+    // Field tanpa group
+    const ungroupedFields = itemFields.filter(f => {
+      const groupId = f.group_item_aktivitas_id || '';
+      return !groupId || groupId === '';
+    });
+    ungroupedFields.forEach(field => {
+      renderItems.push({
+        type: 'field',
+        id: field.id_item_aktivitas,
+        urutan: field.urutan || 0,
+        field: field,
+        data: item.values[field.id_item_aktivitas],
+      });
+    });
+
+    // Group
+    const groupIds = Object.keys(groupedFields);
+    groupIds.forEach(groupId => {
+      const group = groupData[groupId];
+      const fields = groupedFields[groupId];
+      if (!group || !fields || fields.length === 0) return;
+      renderItems.push({
+        type: 'group',
+        id: groupId,
+        urutan: group.urutan || 0,
+        group: group,
+        fields: fields,
+      });
+    });
+
+    renderItems.sort((a, b) => a.urutan - b.urutan);
+
+    return (
+      <Box>
+        {renderItems.map((itemData) => {
+          if (itemData.type === 'field') {
+            const field = itemData.field;
+            const value = itemData.data;
+            return (
+              <Box key={field.id_item_aktivitas} sx={{ mb: 2 }}>
+                {renderItemField(field, value, index)}
+              </Box>
+            );
+          } else if (itemData.type === 'group') {
+            const group = itemData.group;
+            const fields = itemData.fields;
+            return (
+              <Accordion
+                key={group.id_group_item_aktivitas}
+                defaultExpanded
+                sx={{
+                  mb: 2,
+                  borderRadius: '4px !important',
+                  '&:before': { display: 'none' },
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon />}
+                  sx={{
+                    backgroundColor: '#f5f5f5',
+                    borderRadius: '4px',
+                    '& .MuiAccordionSummary-content': { alignItems: 'center' },
+                  }}
+                >
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      {group.group_label || group.group_name || 'Group'}
+                    </Typography>
+                    {group.deskripsi && (
+                      <Typography variant="caption" color="text.secondary">
+                        {group.deskripsi}
+                      </Typography>
+                    )}
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails sx={{ pt: 2 }}>
+                  {fields.map((field) => (
+                    <Box key={field.id_item_aktivitas} sx={{ mb: 2 }}>
+                      {renderItemField(field, item.values[field.id_item_aktivitas], index)}
+                    </Box>
+                  ))}
+                </AccordionDetails>
+              </Accordion>
+            );
+          }
+          return null;
+        })}
+      </Box>
+    );
   };
 
   const validateItems = () => {
@@ -459,9 +620,21 @@ const TambahItem = () => {
     }
   };
 
+  // 🔥 FUNGSI UPDATE STATUS IDENTITAS YANG DIPERBARUI
   const updateIdentitasStatus = async () => {
     try {
       const dbRef = ref(database);
+      // 1. Cek apakah daftar aktivitas ini memiliki field detail item
+      const detailFieldsSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
+      const detailFields = detailFieldsSnapshot.val();
+      let hasDetailFields = false;
+      if (detailFields) {
+        hasDetailFields = Object.values(detailFields).some(
+          f => f.daftar_aktivitas_id === daftarAktivitasId && f.is_active === true
+        );
+      }
+
+      // 2. Ambil semua item aktif untuk identitas ini
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
       const itemData = itemSnapshot.val();
       const activeItems = [];
@@ -474,35 +647,40 @@ const TambahItem = () => {
         }
       }
 
-      if (activeItems.length === 0) return;
-
-      const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
-      const detailData = detailSnapshot.val();
-      const allHasDetail = activeItems.every(item => {
-        if (!detailData) return false;
-        for (const key in detailData) {
-          const detail = detailData[key];
-          if (detail.data_item_aktivitas_id === item.id && detail.is_active === true) {
-            return true;
-          }
-        }
-        return false;
-      });
-
+      // 3. Tentukan status baru
       let statusName = 'ongoing';
-      if (allHasDetail) {
-        statusName = 'draft';
+      if (activeItems.length > 0) {
+        if (hasDetailFields) {
+          // Jika ada detail fields, cek apakah semua item memiliki detail aktif
+          const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
+          const detailData = detailSnapshot.val();
+          const allHasDetail = activeItems.every(item => {
+            if (!detailData) return false;
+            for (const key in detailData) {
+              const detail = detailData[key];
+              if (detail.data_item_aktivitas_id === item.id && detail.is_active === true) {
+                return true;
+              }
+            }
+            return false;
+          });
+          if (allHasDetail) statusName = 'draft';
+        } else {
+          // Jika tidak ada detail fields, cukup ada item aktif => draft
+          statusName = 'draft';
+        }
       }
+
+      // 4. Update status identitas
       const statusId = await getStatusId(statusName);
-      if (!statusId) return;
-
-      const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
-      await update(identitasRef, {
-        status_aktivitas_id: statusId,
-        updated_at: new Date().toISOString(),
-      });
-
-      console.log(`✅ Status identitas diubah menjadi ${statusName} (${statusId})`);
+      if (statusId) {
+        const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
+        await update(identitasRef, {
+          status_aktivitas_id: statusId,
+          updated_at: new Date().toISOString(),
+        });
+        console.log(`✅ Status identitas diubah menjadi ${statusName} (${statusId})`);
+      }
     } catch (error) {
       console.error('Error updating identitas status:', error);
     }
@@ -589,7 +767,6 @@ const TambahItem = () => {
         setTimeout(() => setShowDetailDialog(true), 500);
       } else {
         setTimeout(() => {
-          // 🔥 Kembali ke DataItem dengan pelakuId, pelakuName, dan statusName
           navigate('/data-item', {
             state: {
               dataIdentitasId: dataIdentitasId,
@@ -687,10 +864,10 @@ const TambahItem = () => {
               Data Identitas
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 1 }}>
-              {/* Pengamat */}
+              {/* Pembuat */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                  Pengamat
+                  Di Buat Oleh
                 </Typography>
                 <Typography variant="body2">
                   {pelakuName || '-'}
@@ -771,11 +948,8 @@ const TambahItem = () => {
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </Box>
-                  {itemFields.map((field) => (
-                    <Box key={field.id_item_aktivitas} sx={{ mb: 2 }}>
-                      {renderItemField(field, item.values[field.id_item_aktivitas], index)}
-                    </Box>
-                  ))}
+                  {/* 🔥 Gunakan renderGroupedFields */}
+                  {renderGroupedFields(item, index)}
                 </CardContent>
               </Card>
             ))

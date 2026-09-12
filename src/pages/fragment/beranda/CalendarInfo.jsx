@@ -560,7 +560,7 @@ const CalendarInfo = ({ isPengamat }) => {
               fontWeight: 500,
               '& .MuiSelect-select': {
                 py: 0,
-                px: 0.5,
+                paddingRight:'0px !important',
                 display: 'flex',
                 alignItems: 'center',
               },
@@ -588,7 +588,7 @@ const CalendarInfo = ({ isPengamat }) => {
               fontWeight: 500,
               '& .MuiSelect-select': {
                 py: 0,
-                px: 0.5,
+                paddingRight:'0px !important',
                 display: 'flex',
                 alignItems: 'center',
               },
@@ -609,11 +609,7 @@ const CalendarInfo = ({ isPengamat }) => {
           {loadingHolidays && (
             <CircularProgress size={16} sx={{ ml: 1 }} />
           )}
-          {holidayError && (
-            <Typography variant="caption" color="error" sx={{ ml: 1 }}>
-              ⚠️ Gagal memuat libur
-            </Typography>
-          )}
+          
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
           <IconButton size="small" onClick={prevMonth}>
@@ -647,6 +643,7 @@ const CalendarInfo = ({ isPengamat }) => {
           >
             {name}
           </Box>
+          
         ))}
 
         {calendarData.map((date, index) => {
