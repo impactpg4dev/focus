@@ -279,7 +279,6 @@ const EditItem = () => {
       const grouped = {};
       const ungrouped = [];
       foundItems.forEach(field => {
-        // Gunakan field.group_item_aktivitas_id sesuai struktur baru
         const groupId = field.group_item_aktivitas_id || '';
         if (groupId && groupId !== '') {
           if (!grouped[groupId]) grouped[groupId] = [];
@@ -305,37 +304,23 @@ const EditItem = () => {
       if (foundItems.length > 0 && editDataParam) {
         const existingValues = {};
         const valueMap = editDataParam.values || {};
-        const fieldLabels = editDataParam.fieldLabels || [];
 
         foundItems.forEach(field => {
           let value = '';
-          const normalize = (str) => str?.toLowerCase().trim() || '';
-          const normalizedLabel = normalize(field.label);
-          const normalizedNamaField = normalize(field.nama_field);
 
-          if (valueMap[field.label] !== undefined && valueMap[field.label] !== null) {
-            value = String(valueMap[field.label]);
-          } else if (field.nama_field && valueMap[field.nama_field] !== undefined && valueMap[field.nama_field] !== null) {
-            value = String(valueMap[field.nama_field]);
+          // ✅ Prioritas 1: baca by ID (format baru)
+          const idValue = valueMap[field.id_item_aktivitas];
+          if (idValue !== undefined && idValue !== null) {
+            value = String(idValue);
           } else {
-            const matchedKey = fieldLabels.find(
-              key => normalize(key) === normalizedLabel || normalize(key) === normalizedNamaField
-            );
-            if (matchedKey && valueMap[matchedKey] !== undefined && valueMap[matchedKey] !== null) {
-              value = String(valueMap[matchedKey]);
-            }
-          }
-          if (value === '') {
+            // Fallback: format lama (label / nama_field sebagai key)
+            const normalize = (str) => str?.toLowerCase().trim() || '';
+            const normalizedLabel = normalize(field.label);
+            const normalizedNamaField = normalize(field.nama_field);
+
             const matchedKey = Object.keys(valueMap).find(
-              key => normalize(key) === normalizedLabel || normalize(key) === normalizedNamaField
-            );
-            if (matchedKey && valueMap[matchedKey] !== undefined && valueMap[matchedKey] !== null) {
-              value = String(valueMap[matchedKey]);
-            }
-          }
-          if (value === '') {
-            const matchedKey = Object.keys(valueMap).find(
-              key => normalize(key).includes(normalizedLabel) || normalizedLabel.includes(normalize(key))
+              key => normalize(key) === normalizedLabel ||
+                     normalize(key) === normalizedNamaField
             );
             if (matchedKey && valueMap[matchedKey] !== undefined && valueMap[matchedKey] !== null) {
               value = String(valueMap[matchedKey]);

@@ -20,6 +20,7 @@ import {
   AccordionDetails,
   Button,
   IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -29,14 +30,16 @@ import {
   Edit as EditIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
+  Tune as TuneIcon,
 } from '@mui/icons-material';
 import { database, ref, get, child, update } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
+import HiddenFieldsDialog from '../../../components/activity/HiddenFieldsDialog';
+import { useHiddenFieldIds } from '../../../hooks/useHiddenFieldIds';
 
 // 🔥 Internal fields yang tidak ditampilkan sebagai identitas
-// Tambahkan 'catatanRevisi' (tanpa underscore) untuk menyembunyikan catatan revisi
 const internalFields = [
   'id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName',
   'updatedAt', 'atasan_id', 'catatan_revisi', 'catatanRevisi', 'is_active'
@@ -88,6 +91,14 @@ const DataDetailItem = () => {
   const [success, setSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
+  // ✅ ID-keyed info fields untuk panel hijau
+  const [identitasInfoFields, setIdentitasInfoFields] = useState([]);
+  const [itemInfoFields, setItemInfoFields] = useState([]);
+
+  // ✅ Shared hidden fields state (synced)
+  const [hiddenFieldIds, setHiddenFieldIds] = useHiddenFieldIds();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const navigationState = location.state;
 
   // ===== Ambil role user (ID) =====
@@ -117,7 +128,6 @@ const DataDetailItem = () => {
   const checkUserAllowed = (allowedPositions, allowedRoles) => {
     if (!allowedPositions || !allowedRoles) return false;
 
-    // Konversi ke array jika masih object
     let positions = allowedPositions;
     let roles = allowedRoles;
     if (positions && typeof positions === 'object' && !Array.isArray(positions)) {
@@ -197,7 +207,6 @@ const DataDetailItem = () => {
     setActivityData(navigationState.activityData || null);
     setDaftarAktivitasData(navigationState.daftarAktivitasData || null);
 
-    // 🔥 Ambil pelakuId, pelakuName, dan statusName dari navigationState
     const pelakuIdFromState = navigationState.pelakuId || null;
     const pelakuIdFromValues = navigationState.identitasValues?.pelakuId || null;
     const finalPelakuId = pelakuIdFromState || pelakuIdFromValues || null;
@@ -221,6 +230,7 @@ const DataDetailItem = () => {
       const dbRef = ref(database);
       const dataItemId = navigationState.dataItemId;
       const daftarId = navigationState.daftarAktivitasId;
+      const dataIdentitasId = navigationState.dataIdentitasId;
 
       // Ambil field detail item untuk urutan dan mapping
       const detailFieldsSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
@@ -258,7 +268,6 @@ const DataDetailItem = () => {
       const valuesSnapshot = await get(child(dbRef, 'dtb_data_detail_item_values'));
       const valuesData = valuesSnapshot.val();
 
-      // Filter detail item berdasarkan data_item_aktivitas_id dan is_active === true
       const groupedItems = {};
       if (detailData) {
         const detailList = Object.values(detailData);
@@ -272,10 +281,10 @@ const DataDetailItem = () => {
             id: detailId,
             createdAt: item.created_at,
             values: {},
+            fieldLabels: {},
           };
         });
 
-        // Ambil values untuk setiap detail item
         if (valuesData) {
           const valuesList = Object.values(valuesData);
           filteredDetails.forEach(item => {
@@ -286,20 +295,98 @@ const DataDetailItem = () => {
             detailValues.forEach(val => {
               const field = detailFieldsMap[val.detail_item_aktivitas_id];
               const label = field?.label || val.detail_item_aktivitas_id;
-              groupedItems[detailId].values[label] = val.value_text;
+              groupedItems[detailId].values[val.detail_item_aktivitas_id] = val.value_text;
+              groupedItems[detailId].fieldLabels[val.detail_item_aktivitas_id] = label;
             });
           });
         }
       }
 
-      // Format untuk ditampilkan
       const formattedItems = Object.values(groupedItems).map(item => ({
         id: item.id,
         createdAt: item.createdAt,
         values: item.values,
+        fieldLabels: item.fieldLabels,
       }));
       formattedItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setDetailItems(formattedItems);
+
+      // ============================================================
+      // ✅ FETCH DATA UNTUK PANEL HIJAU (ID-keyed)
+      // ============================================================
+
+      // ----- Identitas -----
+      if (dataIdentitasId) {
+        const identitasFieldsSnap = await get(child(dbRef, 'dtb_identitas_aktivitas'));
+        const identitasFieldsData = identitasFieldsSnap.val();
+        const identitasFieldsMap = {};
+        Object.values(identitasFieldsData || {}).forEach(f => {
+          identitasFieldsMap[f.id_identitas_aktivitas] = f;
+        });
+
+        const identitasValuesSnap = await get(child(dbRef, 'dtb_data_identitas_values'));
+        const identitasValuesData = identitasValuesSnap.val();
+
+        const lokasiSnap = await get(child(dbRef, 'tb_status_lokasi'));
+        const lokasiData = lokasiSnap.val();
+        const lokasiMap = {};
+        Object.values(lokasiData || {}).forEach(l => {
+          if (l.id_lokasi) lokasiMap[l.id_lokasi] = l.lokasi || l.id_lokasi;
+        });
+
+        const identitasValuesList = Object.values(identitasValuesData || {}).filter(
+          v => v.data_identitas_aktivitas_id === dataIdentitasId
+        );
+
+        const identitasInfoList = identitasValuesList.map(v => {
+          const field = identitasFieldsMap[v.identitas_aktivitas_id];
+          let value = v.value_text;
+          if (field?.nama_identitas === 'lokasi' || field?.label === 'Lokasi') {
+            value = lokasiMap[value] || value;
+          }
+          return {
+            id: v.identitas_aktivitas_id,
+            label: field?.label || v.identitas_aktivitas_id,
+            value: value || '-',
+            urutan: field?.urutan || 0,
+          };
+        }).sort((a, b) => a.urutan - b.urutan);
+
+        setIdentitasInfoFields(identitasInfoList);
+      } else {
+        setIdentitasInfoFields([]);
+      }
+
+      // ----- Item -----
+      if (dataItemId) {
+        const itemFieldsSnap = await get(child(dbRef, 'dtb_item_aktivitas'));
+        const itemFieldsData = itemFieldsSnap.val();
+        const itemFieldsMap = {};
+        Object.values(itemFieldsData || {}).forEach(f => {
+          itemFieldsMap[f.id_item_aktivitas] = f;
+        });
+
+        const itemValuesSnap = await get(child(dbRef, 'dtb_data_item_values'));
+        const itemValuesData = itemValuesSnap.val();
+
+        const itemValuesList = Object.values(itemValuesData || {}).filter(
+          v => v.data_item_aktivitas_id === dataItemId
+        );
+
+        const itemInfoList = itemValuesList.map(v => {
+          const field = itemFieldsMap[v.item_aktivitas_id];
+          return {
+            id: v.item_aktivitas_id,
+            label: field?.label || v.item_aktivitas_id,
+            value: v.value_text || '-',
+            urutan: field?.urutan || 0,
+          };
+        }).sort((a, b) => a.urutan - b.urutan);
+
+        setItemInfoFields(itemInfoList);
+      } else {
+        setItemInfoFields([]);
+      }
 
     } catch (error) {
       console.error('Error fetching detail item data:', error);
@@ -367,7 +454,6 @@ const DataDetailItem = () => {
     });
   };
 
-  // Handler untuk delete
   const handleDeleteClick = (detailId) => {
     setSelectedDetailId(detailId);
     setDeleteDialogOpen(true);
@@ -379,7 +465,6 @@ const DataDetailItem = () => {
     setError('');
     try {
       const dbRef = ref(database);
-      // Cari key dari dtb_data_detail_item_aktivitas berdasarkan id_data_detail_item_aktivitas
       const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
       const detailData = detailSnapshot.val();
       let detailKey = null;
@@ -397,7 +482,6 @@ const DataDetailItem = () => {
         setDeleteDialogOpen(false);
         return;
       }
-      // Soft delete: set is_active = false
       await update(ref(database, `dtb_data_detail_item_aktivitas/${detailKey}`), {
         is_active: false,
         updated_at: new Date().toISOString(),
@@ -408,7 +492,6 @@ const DataDetailItem = () => {
       setSuccessMessage('Data detail item berhasil dihapus!');
       setSuccess(true);
 
-      // Refresh data
       await fetchData();
 
     } catch (error) {
@@ -435,14 +518,30 @@ const DataDetailItem = () => {
   };
 
   // ============================================================
-  // LOGIKA AKSES (hanya berdasarkan allowed_by_position & allowed_by_role)
+  // ✅ HANDLER DIALOG PENGATURAN (shared)
+  // ============================================================
+  const openSettings = () => setSettingsOpen(true);
+  const closeSettings = () => setSettingsOpen(false);
+  const saveSettings = (newHidden) => {
+    setHiddenFieldIds(newHidden);
+    setSettingsOpen(false);
+  };
+
+  const visibleIdentitasFields = identitasInfoFields.filter(
+    f => !hiddenFieldIds.includes(f.id)
+  );
+  const visibleItemFields = itemInfoFields.filter(
+    f => !hiddenFieldIds.includes(f.id)
+  );
+
+  // ============================================================
+  // LOGIKA AKSES
   // ============================================================
   const isAllowed = isAllowedByDaftar;
   const isAddable = isAllowed && ['draft', 'ongoing', 'rejected'].includes(statusName);
   const isEditable = isAddable;
   const isOwnData = isAllowed ? pelakuId === userData?.uid : true;
 
-  // 🔥 Fungsi untuk merender satu item dengan group sesuai urutan
   const renderGroupedFieldsForItem = (item, index) => {
     const renderItems = [];
 
@@ -477,7 +576,7 @@ const DataDetailItem = () => {
         {renderItems.map((itemData) => {
           if (itemData.type === 'field') {
             const field = itemData.field;
-            const value = item.values[field.label] || '-';
+            const value = item.values[field.id_detail_item_aktivitas] || '-';
             return (
               <Box key={field.id_detail_item_aktivitas} sx={{ mb: 1 }}>
                 <Box
@@ -532,7 +631,7 @@ const DataDetailItem = () => {
                 </AccordionSummary>
                 <AccordionDetails sx={{ pt: 2 }}>
                   {fields.map((field) => {
-                    const value = item.values[field.label] || '-';
+                    const value = item.values[field.id_detail_item_aktivitas] || '-';
                     return (
                       <Box key={field.id_detail_item_aktivitas} sx={{ mb: 2 }}>
                         <Box
@@ -586,7 +685,6 @@ const DataDetailItem = () => {
     );
   }
 
-  // 🔥 CEK AKSES: Jika user diizinkan tetapi data bukan milik sendiri
   if (isAllowed && !isOwnData) {
     return (
       <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pt: 0, pb: 10 }}>
@@ -612,6 +710,16 @@ const DataDetailItem = () => {
     );
   }
 
+  const showIdentitasSection =
+    Object.keys(identitasValues).length > 0 ||
+    pelakuName ||
+    statusName ||
+    visibleIdentitasFields.length > 0;
+
+  const showItemSection = visibleItemFields.length > 0;
+
+  const showPanel = showIdentitasSection || showItemSection;
+
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pt: 0, pb: 10 }}>
       <AppBar
@@ -622,7 +730,6 @@ const DataDetailItem = () => {
       />
       
       <Container maxWidth="sm" sx={{ pt: 2, pb: 8, px: 2 }}>
-        {/* Header Info - Aktivitas */}
         <Box sx={{ mb:2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box>
             <Typography variant="caption" color="text.secondary">
@@ -632,26 +739,32 @@ const DataDetailItem = () => {
               {activityData?.inisial || ''} / {daftarAktivitasData?.nama_daftar_aktivitas || ''}
             </Typography>
           </Box>
-          <Chip
-            label={`${detailItems.length} Item`}
-            size="small"
-            color="primary"
-          />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Chip
+              label={`${detailItems.length} Item`}
+              size="small"
+              color="primary"
+            />
+            <Tooltip title="Pengaturan tampilan">
+              <IconButton
+                size="small"
+                onClick={openSettings}
+                sx={{ p: 0.5, color: 'text.secondary' }}
+              >
+                <TuneIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Box>
 
-        {/* ========================================================== */}
-        {/* DATA IDENTITAS - DENGAN PENAMBAHAN PENGAWAS & STATUS */}
-        {/* ========================================================== */}
-        {(Object.keys(identitasValues).length > 0 || Object.keys(itemValues).length > 0) && (
+        {showPanel && (
           <Paper sx={{ p: 2, mb: 2, borderRadius: '4px', bgcolor: '#A5D6A7' }}>
-            {/* Data Identitas */}
-            {Object.keys(identitasValues).length > 0 && (
+            {showIdentitasSection && (
               <>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                   Data Identitas
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {/* Pembuat */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                       Di Buat Oleh
@@ -660,7 +773,6 @@ const DataDetailItem = () => {
                       {pelakuName || '-'}
                     </Typography>
                   </Box>
-                  {/* 🔥 Status */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                       Status
@@ -669,46 +781,9 @@ const DataDetailItem = () => {
                       {statusName || '-'}
                     </Typography>
                   </Box>
-                  {/* Field identitas lainnya - catatanRevisi dan catatan_revisi sudah difilter oleh internalFields */}
-                  {Object.entries(identitasValues)
-                    .filter(([key]) => !internalFields.includes(key))
-                    .map(([label, value]) => (
-                      <Box
-                        key={label}
-                        sx={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          py: 0.5,
-                          borderBottom: '1px solid',
-                          borderColor: 'divider',
-                          '&:last-child': { borderBottom: 'none' },
-                        }}
-                      >
-                        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                          {label}
-                        </Typography>
-                        <Typography variant="body2">{value}</Typography>
-                      </Box>
-                    ))}
-                </Box>
-              </>
-            )}
-
-            {/* Pemisah jika kedua data ada */}
-            {Object.keys(identitasValues).length > 0 && Object.keys(itemValues).length > 0 && (
-              <Divider sx={{ my: 1.5 }} />
-            )}
-
-            {/* Data Item */}
-            {Object.keys(itemValues).length > 0 && (
-              <>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                  Data Item
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {Object.entries(itemValues).map(([label, value]) => (
+                  {visibleIdentitasFields.map(field => (
                     <Box
-                      key={label}
+                      key={field.id}
                       sx={{
                         display: 'flex',
                         justifyContent: 'space-between',
@@ -719,9 +794,41 @@ const DataDetailItem = () => {
                       }}
                     >
                       <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                        {label}
+                        {field.label}
                       </Typography>
-                      <Typography variant="body2">{value}</Typography>
+                      <Typography variant="body2">{field.value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </>
+            )}
+
+            {showIdentitasSection && showItemSection && (
+              <Divider sx={{ my: 1.5 }} />
+            )}
+
+            {showItemSection && (
+              <>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  Data Item
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  {visibleItemFields.map(field => (
+                    <Box
+                      key={field.id}
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        py: 0.5,
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                        '&:last-child': { borderBottom: 'none' },
+                      }}
+                    >
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                        {field.label}
+                      </Typography>
+                      <Typography variant="body2">{field.value}</Typography>
                     </Box>
                   ))}
                 </Box>
@@ -736,7 +843,6 @@ const DataDetailItem = () => {
           </Alert>
         )}
 
-        {/* Detail Item List */}
         <Paper sx={{ p: 2, borderRadius: '4px' }}>
           <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
             Data Detail Item
@@ -751,7 +857,6 @@ const DataDetailItem = () => {
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                 Silakan buat data detail item baru terlebih dahulu
               </Typography>
-              {/* Tombol Tambah Detail Item hanya muncul jika isAddable true */}
               {isAddable && (
                 <Button
                   variant="contained"
@@ -774,7 +879,6 @@ const DataDetailItem = () => {
               {detailItems.map((item, index) => (
                 <Card key={item.id} variant="outlined" sx={{ mb: 2, borderRadius: '4px', boxShadow: 0 }}>
                   <CardContent sx={{ p: 2 }}>
-                    {/* Header Card dengan Delete Icon */}
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="subtitle2" fontWeight="bold" color="primary">
                         Detail Item #{index + 1}
@@ -805,7 +909,6 @@ const DataDetailItem = () => {
         </Paper>
       </Container>
 
-      {/* Tombol Fixed di Bawah */}
       <Container
         maxWidth="sm"
         sx={{
@@ -868,7 +971,6 @@ const DataDetailItem = () => {
         </Box>
       </Container>
 
-      {/* Dialog Konfirmasi Delete */}
       <Dialog
         open={deleteDialogOpen}
         onClose={handleDeleteDialogClose}
@@ -881,6 +983,16 @@ const DataDetailItem = () => {
         confirmColor="error"
         showCloseButton={false}
         loading={deleting}
+      />
+
+      {/* ✅ Shared dialog pengaturan */}
+      <HiddenFieldsDialog
+        open={settingsOpen}
+        onClose={closeSettings}
+        onSave={saveSettings}
+        identitasInfoFields={identitasInfoFields}
+        itemInfoFields={itemInfoFields}
+        hiddenFieldIds={hiddenFieldIds}
       />
 
       <Snackbar

@@ -63,6 +63,8 @@ const DataItem = () => {
   // State untuk group data
   const [groupData, setGroupData] = useState({});
   const [fieldGroupMap, setFieldGroupMap] = useState({});
+  // ✅ State untuk menyimpan field metadata (untuk sorting by urutan)
+  const [itemFields, setItemFields] = useState([]);
 
   // 🔥 State untuk mengecek apakah ada detail item
   const [hasDetailItem, setHasDetailItem] = useState(false);
@@ -272,14 +274,18 @@ const DataItem = () => {
       }
       setGroupData(groupMap);
 
-      // Ambil field item untuk mapping group_id
+      // Ambil field item untuk mapping group_id + simpan field metadata untuk sorting
       const itemFieldsSnapshot = await get(child(dbRef, 'dtb_item_aktivitas'));
       const itemFieldsData = itemFieldsSnapshot.val();
       const itemFieldsMap = {};
       const fieldGroupMapTemp = {};
+      const activeItemFields = [];
       if (itemFieldsData) {
         Object.values(itemFieldsData).forEach(field => {
           itemFieldsMap[field.id_item_aktivitas] = field;
+          if (field.daftar_aktivitas_id === daftarId && field.is_active === true) {
+            activeItemFields.push(field);
+          }
           const groupId = field.group_item_aktivitas_id || '';
           if (groupId) {
             fieldGroupMapTemp[field.id_item_aktivitas] = groupId;
@@ -287,6 +293,7 @@ const DataItem = () => {
         });
       }
       setFieldGroupMap(fieldGroupMapTemp);
+      setItemFields(activeItemFields);
 
       // Ambil data item
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
@@ -307,10 +314,11 @@ const DataItem = () => {
           groupedItems[itemId] = {
             id: itemId,
             createdAt: item.created_at,
-            values: {},
+            values: {},          // ✅ { [id_item_aktivitas]: value_text }
+            fieldLabels: {},     // ✅ { [id_item_aktivitas]: label }
+            fieldGroups: {},     // ✅ { [id_item_aktivitas]: group_id }
             fullData: item,
             valueIds: [],
-            fieldDetails: {},
           };
         });
 
@@ -325,12 +333,10 @@ const DataItem = () => {
               const field = itemFieldsMap[val.item_aktivitas_id];
               const label = field?.label || val.item_aktivitas_id;
               const groupId = fieldGroupMapTemp[val.item_aktivitas_id] || '';
-              groupedItems[itemId].values[label] = val.value_text;
+              groupedItems[itemId].values[val.item_aktivitas_id] = val.value_text;
+              groupedItems[itemId].fieldLabels[val.item_aktivitas_id] = label;
+              groupedItems[itemId].fieldGroups[val.item_aktivitas_id] = groupId;
               groupedItems[itemId].valueIds.push(val.id_data_item_value);
-              groupedItems[itemId].fieldDetails[val.item_aktivitas_id] = {
-                label,
-                groupId,
-              };
             });
           });
         }
@@ -363,6 +369,14 @@ const DataItem = () => {
       setError('Daftar aktivitas ini tidak memiliki field detail item.');
       return;
     }
+
+    // ✅ Konversi values (ID-keyed) → label-keyed untuk display header di DataDetailItem
+    const displayItemValues = {};
+    Object.entries(data.values).forEach(([fieldId, value]) => {
+      const label = data.fieldLabels[fieldId] || fieldId;
+      displayItemValues[label] = value;
+    });
+
     navigate('/data-detail-item', {
       state: {
         dataItemId: data.id,
@@ -370,12 +384,12 @@ const DataItem = () => {
         daftarAktivitasId: daftarAktivitasId,
         aktivitasId: aktivitasId,
         identitasValues: identitasValues,
-        itemValues: data.values,
+        itemValues: displayItemValues, // ✅ label-keyed untuk display header
         activityData: activityData,
         daftarAktivitasData: daftarAktivitasData,
         pelakuId: pelakuId,
         statusName: statusName,
-        statusApproval: statusApproval, // kirim juga
+        statusApproval: statusApproval,
       }
     });
   };
@@ -408,9 +422,8 @@ const DataItem = () => {
         identitasValues: identitasValues,
         editData: {
           itemId: data.id,
-          values: data.values,
+          values: data.values,       // ✅ ID-keyed
           valueIds: data.valueIds || [],
-          fieldLabels: Object.keys(data.values),
         },
       }
     });
@@ -500,28 +513,38 @@ const DataItem = () => {
   };
 
   // ============================================================
-  // Fungsi untuk mengelompokkan values berdasarkan group
+  // ✅ Fungsi untuk mengelompokkan values berdasarkan group (ID-based)
   // ============================================================
   const getGroupedValues = (item) => {
-    const entries = Object.entries(item.values);
     const grouped = {};
     const ungrouped = [];
 
-    entries.forEach(([label, value]) => {
-      let groupId = '';
-      for (const fieldId in item.fieldDetails) {
-        if (item.fieldDetails[fieldId].label === label) {
-          groupId = item.fieldDetails[fieldId].groupId;
-          break;
-        }
-      }
+    Object.entries(item.values).forEach(([fieldId, value]) => {
+      const label = item.fieldLabels[fieldId] || fieldId;
+      const groupId = item.fieldGroups[fieldId] || '';
 
       if (groupId && groupData[groupId]) {
         if (!grouped[groupId]) grouped[groupId] = [];
-        grouped[groupId].push({ label, value });
+        grouped[groupId].push({ fieldId, label, value });
       } else {
-        ungrouped.push({ label, value });
+        ungrouped.push({ fieldId, label, value });
       }
+    });
+
+    // Urutkan field di dalam group sesuai field.urutan
+    Object.keys(grouped).forEach(gid => {
+      grouped[gid].sort((a, b) => {
+        const fa = itemFields.find(f => f.id_item_aktivitas === a.fieldId);
+        const fb = itemFields.find(f => f.id_item_aktivitas === b.fieldId);
+        return (fa?.urutan || 0) - (fb?.urutan || 0);
+      });
+    });
+
+    // Urutkan ungrouped juga
+    ungrouped.sort((a, b) => {
+      const fa = itemFields.find(f => f.id_item_aktivitas === a.fieldId);
+      const fb = itemFields.find(f => f.id_item_aktivitas === b.fieldId);
+      return (fa?.urutan || 0) - (fb?.urutan || 0);
     });
 
     const sortedGroupIds = Object.keys(grouped).sort((a, b) => {
@@ -753,9 +776,9 @@ const DataItem = () => {
                     {/* Render ungrouped fields */}
                     {ungrouped.length > 0 && (
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
-                        {ungrouped.map(({ label, value }) => (
+                        {ungrouped.map(({ fieldId, label, value }) => (
                           <Box
-                            key={label}
+                            key={fieldId}
                             sx={{
                               display: 'flex',
                               justifyContent: 'space-between',
@@ -811,9 +834,9 @@ const DataItem = () => {
                             </Typography>
                           </AccordionSummary>
                           <AccordionDetails sx={{ pt: 1, pb: 1 }}>
-                            {fields.map(({ label, value }) => (
+                            {fields.map(({ fieldId, label, value }) => (
                               <Box
-                                key={label}
+                                key={fieldId}
                                 sx={{
                                   display: 'flex',
                                   justifyContent: 'space-between',

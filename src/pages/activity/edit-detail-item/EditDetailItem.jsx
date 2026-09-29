@@ -20,6 +20,7 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Tooltip,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -27,11 +28,14 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   ExpandMore as ExpandMoreIcon,
+  Tune as TuneIcon,
 } from '@mui/icons-material';
 import { database, ref, get, child, push, set, update, remove } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
+import HiddenFieldsDialog from '../../../components/activity/HiddenFieldsDialog';
+import { useHiddenFieldIds } from '../../../hooks/useHiddenFieldIds';
 
 // Opsi untuk field Losses (tetap hardcoded sebagai fallback)
 const lossesOptions = [
@@ -167,12 +171,19 @@ const EditDetailItem = () => {
   const [deleteSuccess, setDeleteSuccess] = useState(false);
   const [deleteSuccessMessage, setDeleteSuccessMessage] = useState('');
 
+  // ✅ ID-keyed info fields untuk panel hijau (shared dengan halaman lain)
+  const [identitasInfoFields, setIdentitasInfoFields] = useState([]);
+  const [itemInfoFields, setItemInfoFields] = useState([]);
+
+  // ✅ Shared hidden fields state (synced)
+  const [hiddenFieldIds, setHiddenFieldIds] = useHiddenFieldIds();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const lokasiMapRef = useRef({});
 
   const navigationState = location.state;
 
   // 🔥 Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan detail_item_aktivitas_id
-  // Perbaikan: mendukung detail_item_aktivitas_id berbentuk array
   const fetchOptionValues = async (detailItemAktivitasId) => {
     try {
       const dbRef = ref(database);
@@ -183,7 +194,6 @@ const EditDetailItem = () => {
       const options = [];
       for (const key in data) {
         const item = data[key];
-        // Periksa apakah detail_item_aktivitas_id adalah array atau string
         const id = item.detail_item_aktivitas_id;
         const isMatch = Array.isArray(id)
           ? id.includes(detailItemAktivitasId)
@@ -196,7 +206,6 @@ const EditDetailItem = () => {
           });
         }
       }
-      // Urutkan berdasarkan urutan
       options.sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
       return options;
     } catch (error) {
@@ -219,7 +228,6 @@ const EditDetailItem = () => {
       setDataItemId(navigationState.dataItemId);
       setEditData(navigationState.editData);
 
-      // 🔥 Ambil pelakuId, pelakuName, dan statusName
       const finalPelakuId =
         navigationState.pelakuId ||
         navigationState.identitasValues?.pelakuId ||
@@ -250,6 +258,14 @@ const EditDetailItem = () => {
 
       if (navigationState.dataItemId) {
         await fetchItemData(navigationState.dataItemId);
+      }
+
+      // ✅ Fetch ID-keyed info untuk panel hijau + settings
+      if (navigationState.dataIdentitasId) {
+        await fetchIdentitasInfoFields(navigationState.dataIdentitasId);
+      }
+      if (navigationState.dataItemId) {
+        await fetchItemInfoFields(navigationState.dataItemId);
       }
 
       await fetchDetailItemFields(navigationState.daftarAktivitasId, navigationState.editData);
@@ -304,6 +320,87 @@ const EditDetailItem = () => {
       setIdentitasValues(formatted);
     } catch (error) {
       console.error('Error fetching lokasi and identitas data:', error);
+    }
+  };
+
+  // ✅ Fetch identitas info ID-keyed (untuk panel + settings)
+  const fetchIdentitasInfoFields = async (dataIdentitasId) => {
+    try {
+      const dbRef = ref(database);
+
+      const identitasSnapshot = await get(child(dbRef, 'dtb_identitas_aktivitas'));
+      const identitasData = identitasSnapshot.val();
+      const identitasMap = {};
+      Object.values(identitasData || {}).forEach(field => {
+        identitasMap[field.id_identitas_aktivitas] = field;
+      });
+
+      const lokasiSnapshot = await get(child(dbRef, 'tb_status_lokasi'));
+      const lokasiData = lokasiSnapshot.val();
+      const lokasiMap = {};
+      Object.values(lokasiData || {}).forEach(l => {
+        if (l.id_lokasi) lokasiMap[l.id_lokasi] = l.lokasi || l.id_lokasi;
+      });
+
+      const valuesSnapshot = await get(child(dbRef, 'dtb_data_identitas_values'));
+      const valuesData = valuesSnapshot.val();
+      const valuesList = Object.values(valuesData || {}).filter(
+        v => v.data_identitas_aktivitas_id === dataIdentitasId
+      );
+
+      const infoList = valuesList.map(v => {
+        const field = identitasMap[v.identitas_aktivitas_id];
+        let value = v.value_text;
+        if (field?.nama_identitas === 'lokasi' || field?.label === 'Lokasi') {
+          value = lokasiMap[value] || value;
+        }
+        return {
+          id: v.identitas_aktivitas_id,
+          label: field?.label || v.identitas_aktivitas_id,
+          value: value || '-',
+          urutan: field?.urutan || 0,
+        };
+      }).sort((a, b) => a.urutan - b.urutan);
+
+      setIdentitasInfoFields(infoList);
+    } catch (error) {
+      console.error('Error fetching identitas info fields:', error);
+      setIdentitasInfoFields([]);
+    }
+  };
+
+  // ✅ Fetch item info ID-keyed (untuk panel + settings)
+  const fetchItemInfoFields = async (dataItemId) => {
+    try {
+      const dbRef = ref(database);
+
+      const itemSnapshot = await get(child(dbRef, 'dtb_item_aktivitas'));
+      const itemData = itemSnapshot.val();
+      const itemMap = {};
+      Object.values(itemData || {}).forEach(field => {
+        itemMap[field.id_item_aktivitas] = field;
+      });
+
+      const valuesSnapshot = await get(child(dbRef, 'dtb_data_item_values'));
+      const valuesData = valuesSnapshot.val();
+      const valuesList = Object.values(valuesData || {}).filter(
+        v => v.data_item_aktivitas_id === dataItemId
+      );
+
+      const infoList = valuesList.map(v => {
+        const field = itemMap[v.item_aktivitas_id];
+        return {
+          id: v.item_aktivitas_id,
+          label: field?.label || v.item_aktivitas_id,
+          value: v.value_text || '-',
+          urutan: field?.urutan || 0,
+        };
+      }).sort((a, b) => a.urutan - b.urutan);
+
+      setItemInfoFields(infoList);
+    } catch (error) {
+      console.error('Error fetching item info fields:', error);
+      setItemInfoFields([]);
     }
   };
 
@@ -410,7 +507,6 @@ const EditDetailItem = () => {
       });
       setGroupedFields(grouped);
 
-      // 🔥 Ambil opsi untuk semua field select
       const selectFields = foundDetails.filter(f => f.tipe_input === 'select');
       const optionsMapTemp = {};
       for (const field of selectFields) {
@@ -431,11 +527,18 @@ const EditDetailItem = () => {
           const itemValues = {};
           foundDetails.forEach(field => {
             let value = '';
-            if (values[field.label] !== undefined && values[field.label] !== null) {
-              value = String(values[field.label]);
-            } else if (field.nama_field && values[field.nama_field] !== undefined && values[field.nama_field] !== null) {
-              value = String(values[field.nama_field]);
+
+            const idValue = values[field.id_detail_item_aktivitas];
+            if (idValue !== undefined && idValue !== null) {
+              value = String(idValue);
+            } else {
+              if (values[field.label] !== undefined && values[field.label] !== null) {
+                value = String(values[field.label]);
+              } else if (field.nama_field && values[field.nama_field] !== undefined && values[field.nama_field] !== null) {
+                value = String(values[field.nama_field]);
+              }
             }
+
             itemValues[field.id_detail_item_aktivitas] = value;
           });
           const newItem = {
@@ -566,7 +669,6 @@ const EditDetailItem = () => {
     const isCalculation = field.is_calculation === true;
     const fieldValue = value !== undefined && value !== null ? String(value) : '';
 
-    // 🔥 Style untuk label agar sesuai dengan warna AppBar (primary.main)
     const labelSx = {
       '& .MuiInputLabel-root': {
         color: 'primary.main',
@@ -662,9 +764,7 @@ const EditDetailItem = () => {
           />
         );
       case 'select': {
-        // 🔥 Ambil opsi dari optionsMap berdasarkan id field
         const selectOptions = optionsMap[field.id_detail_item_aktivitas] || [];
-        // Jika tidak ada opsi dari database, gunakan hardcoded untuk Losses
         const finalOptions = selectOptions.length > 0 ? selectOptions : (isLossesField ? lossesOptions : []);
         return (
           <Autocomplete
@@ -762,11 +862,9 @@ const EditDetailItem = () => {
     }
   };
 
-  // 🔥 FUNGSI UPDATE STATUS IDENTITAS YANG DIPERBARUI
   const updateIdentitasStatus = async () => {
     try {
       const dbRef = ref(database);
-      // 1. Cek apakah daftar aktivitas ini memiliki field detail item
       const detailFieldsSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
       const detailFields = detailFieldsSnapshot.val();
       let hasDetailFields = false;
@@ -776,7 +874,6 @@ const EditDetailItem = () => {
         );
       }
 
-      // 2. Ambil semua item aktif untuk identitas ini
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
       const itemData = itemSnapshot.val();
       const activeItems = [];
@@ -789,11 +886,9 @@ const EditDetailItem = () => {
         }
       }
 
-      // 3. Tentukan status baru
       let statusName = 'ongoing';
       if (activeItems.length > 0) {
         if (hasDetailFields) {
-          // Jika ada detail fields, cek apakah semua item memiliki detail aktif
           const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
           const detailData = detailSnapshot.val();
           const allHasDetail = activeItems.every(item => {
@@ -808,12 +903,10 @@ const EditDetailItem = () => {
           });
           if (allHasDetail) statusName = 'draft';
         } else {
-          // Jika tidak ada detail fields, cukup ada item aktif => draft
           statusName = 'draft';
         }
       }
 
-      // 4. Update status identitas
       const statusId = await getStatusId(statusName);
       if (statusId) {
         const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
@@ -1029,6 +1122,30 @@ const EditDetailItem = () => {
     );
   };
 
+  // ✅ Handler shared dialog
+  const openSettings = () => setSettingsOpen(true);
+  const closeSettings = () => setSettingsOpen(false);
+  const saveSettings = (newHidden) => {
+    setHiddenFieldIds(newHidden);
+    setSettingsOpen(false);
+  };
+
+  const visibleIdentitasFields = identitasInfoFields.filter(
+    f => !hiddenFieldIds.includes(f.id)
+  );
+  const visibleItemFields = itemInfoFields.filter(
+    f => !hiddenFieldIds.includes(f.id)
+  );
+
+  const showIdentitasSection =
+    Object.keys(identitasValues).length > 0 ||
+    pelakuName ||
+    statusName ||
+    visibleIdentitasFields.length > 0;
+
+  const showItemSection = visibleItemFields.length > 0;
+  const showPanel = showIdentitasSection || showItemSection;
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
@@ -1056,21 +1173,29 @@ const EditDetailItem = () => {
               {activityData?.inisial || ''} / {daftarAktivitasData?.nama_daftar_aktivitas || ''}
             </Typography>
           </Box>
-          <Chip label="Mode Edit" size="small" color="warning" sx={{ mt: 1 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Chip label="Mode Edit" size="small" color="warning" />
+            <Tooltip title="Pengaturan tampilan">
+              <IconButton
+                size="small"
+                onClick={openSettings}
+                sx={{ p: 0.5, color: 'text.secondary' }}
+              >
+                <TuneIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Box>
 
-        {/* ========================================================== */}
-        {/* DATA IDENTITAS - DENGAN PENAMBAHAN PENGAWAS & STATUS */}
-        {/* ========================================================== */}
-        {(Object.keys(identitasValues).length > 0 || Object.keys(itemValues).length > 0) && (
+        {/* PANEL HIJAU */}
+        {showPanel && (
           <Paper sx={{ p: 2, mb: 2, borderRadius: '4px', bgcolor: '#A5D6A7' }}>
-            {Object.keys(identitasValues).length > 0 && (
+            {showIdentitasSection && (
               <>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                   Data Identitas
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {/* 🔥 Pengamat */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                       Pengamat
@@ -1079,7 +1204,6 @@ const EditDetailItem = () => {
                       {pelakuName || '-'}
                     </Typography>
                   </Box>
-                  {/* 🔥 Status */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                     <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                       Status
@@ -1088,44 +1212,9 @@ const EditDetailItem = () => {
                       {statusName || '-'}
                     </Typography>
                   </Box>
-                  {/* Field identitas lainnya - catatanRevisi dan catatan_revisi sudah difilter */}
-                  {Object.entries(identitasValues)
-                    .filter(([key]) => !internalFields.includes(key))
-                    .map(([label, value]) => (
-                      <Box
-                        key={label}
-                        sx={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          py: 0.5,
-                          borderBottom: '1px solid',
-                          borderColor: 'divider',
-                          '&:last-child': { borderBottom: 'none' },
-                        }}
-                      >
-                        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                          {label}
-                        </Typography>
-                        <Typography variant="body2">{value}</Typography>
-                      </Box>
-                    ))}
-                </Box>
-              </>
-            )}
-
-            {Object.keys(identitasValues).length > 0 && Object.keys(itemValues).length > 0 && (
-              <Divider sx={{ my: 1.5 }} />
-            )}
-
-            {Object.keys(itemValues).length > 0 && (
-              <>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                  Data Item
-                </Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {Object.entries(itemValues).map(([label, value]) => (
+                  {visibleIdentitasFields.map(field => (
                     <Box
-                      key={label}
+                      key={field.id}
                       sx={{
                         display: 'flex',
                         justifyContent: 'space-between',
@@ -1136,9 +1225,41 @@ const EditDetailItem = () => {
                       }}
                     >
                       <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                        {label}
+                        {field.label}
                       </Typography>
-                      <Typography variant="body2">{value}</Typography>
+                      <Typography variant="body2">{field.value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </>
+            )}
+
+            {showIdentitasSection && showItemSection && (
+              <Divider sx={{ my: 1.5 }} />
+            )}
+
+            {showItemSection && (
+              <>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  Data Item
+                </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  {visibleItemFields.map(field => (
+                    <Box
+                      key={field.id}
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        py: 0.5,
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                        '&:last-child': { borderBottom: 'none' },
+                      }}
+                    >
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                        {field.label}
+                      </Typography>
+                      <Typography variant="body2">{field.value}</Typography>
                     </Box>
                   ))}
                 </Box>
@@ -1246,7 +1367,6 @@ const EditDetailItem = () => {
         </Box>
       </Container>
 
-      {/* Dialog Konfirmasi Delete */}
       <Dialog
         open={deleteDialogOpen}
         onClose={handleDeleteDialogClose}
@@ -1259,6 +1379,16 @@ const EditDetailItem = () => {
         confirmColor="error"
         showCloseButton={false}
         loading={deleting}
+      />
+
+      {/* ✅ Shared dialog pengaturan */}
+      <HiddenFieldsDialog
+        open={settingsOpen}
+        onClose={closeSettings}
+        onSave={saveSettings}
+        identitasInfoFields={identitasInfoFields}
+        itemInfoFields={itemInfoFields}
+        hiddenFieldIds={hiddenFieldIds}
       />
 
       <Snackbar
