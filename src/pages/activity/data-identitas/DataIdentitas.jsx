@@ -32,6 +32,7 @@ import { database, ref, get, child, update, push, set } from '../../../config/fi
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
+import { sendApprovalEmail } from '../../../utils/emailNotifier';
 
 const DataIdentitas = () => {
   const navigate = useNavigate();
@@ -860,6 +861,9 @@ const DataIdentitas = () => {
       const userName = userData?.name || 'User';
       const roleName = jabatanName || '';
 
+      // 🔥 Kumpulkan data untuk kirim email (hanya untuk action 'kirim')
+      const emailBatch = [];
+
       for (const id of selectedIds) {
         const currentItem = dataIdentitas.find(item => item.id === id);
         if (!currentItem) continue;
@@ -885,7 +889,7 @@ const DataIdentitas = () => {
             navigationState.daftarAktivitasId,
             currentItem.pelakuId || userId
           );
-          
+
           let firstStepId = stepId;
           let firstStepName = 'Approval';
           if (stepId) {
@@ -925,6 +929,35 @@ const DataIdentitas = () => {
           updates[`dtb_data_identitas_aktivitas/${key}/updated_at`] = new Date().toISOString();
 
           finalStatusId = await getStatusId('pending');
+
+          // 🔥 Simpan info untuk kirim email
+          if (firstStepId) {
+            const dataValues = Object.entries(currentItem)
+              .filter(
+                ([k]) =>
+                  ![
+                    'id',
+                    'pelakuId',
+                    'pelakuName',
+                    'createdAt',
+                    'status',
+                    'statusName',
+                    'catatanRevisi',
+                    'currentStepId',
+                    'workflowId',
+                    'statusApproval',
+                    'is_active',
+                  ].includes(k)
+              )
+              .slice(0, 8) // batasi maksimal 8 field
+              .map(([label, value]) => ({ label, value }));
+
+            emailBatch.push({
+              stepId: firstStepId,
+              pelakuName: currentItem.pelakuName || userName,
+              dataValues,
+            });
+          }
         } else if (actionType === 'approved') {
           const result = await processApproval(
             id,
@@ -962,8 +995,55 @@ const DataIdentitas = () => {
         updates[`dtb_data_identitas_aktivitas/${key}/updated_at`] = new Date().toISOString();
       }
 
+      // Update Firebase (proses utama)
       if (Object.keys(updates).length > 0) {
         await update(ref(database), updates);
+      }
+
+      // 🔥 KIRIM EMAIL setelah Firebase update sukses
+      if (actionType === 'kirim' && emailBatch.length > 0) {
+        const namaAktivitas = `${activityData?.inisial || ''} - ${
+          daftarAktivitasData?.nama_daftar_aktivitas || 'Aktivitas'
+        }`
+          .trim()
+          .replace(/^-\s*/, '');
+
+        // Group by stepId — kalau 10 data dengan step sama, kirim 1 email ringkasan
+        const groupedByStep = emailBatch.reduce((acc, item) => {
+          acc[item.stepId] = acc[item.stepId] || [];
+          acc[item.stepId].push(item);
+          return acc;
+        }, {});
+
+        for (const [stepId, items] of Object.entries(groupedByStep)) {
+          const combinedValues = items
+            .flatMap((it, idx) => {
+              const prefix = items.length > 1 ? `[${idx + 1}] ` : '';
+              return it.dataValues.map((d) => ({
+                label: `${prefix}${d.label}`,
+                value: d.value,
+              }));
+            })
+            .slice(0, 15);
+
+          const pelakuNames = [...new Set(items.map((i) => i.pelakuName))].join(
+            ', '
+          );
+
+          try {
+            const result = await sendApprovalEmail(stepId, {
+              namaAktivitas,
+              pelakuName:
+                pelakuNames +
+                (items.length > 1 ? ` (${items.length} data)` : ''),
+              dataValues: combinedValues,
+            });
+            console.log('📧 Hasil kirim email:', result);
+          } catch (emailErr) {
+            // Jangan batalkan proses utama kalau email gagal
+            console.error('❌ Gagal kirim email approval:', emailErr);
+          }
+        }
       }
 
       setActionDialogOpen(false);
