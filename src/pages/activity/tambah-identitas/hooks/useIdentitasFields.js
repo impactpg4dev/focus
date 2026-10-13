@@ -7,6 +7,7 @@ import {
 } from '../services/identitasService';
 import { isLokasiField, isAktivitasField } from '../utils/fieldUtils';
 import { FORM_MODE } from '../constants';
+import { getFriendlyError } from '../../../../utils/permissionUtils';
 
 export const useIdentitasFields = ({
   mode = FORM_MODE.CREATE,
@@ -20,14 +21,12 @@ export const useIdentitasFields = ({
   const [optionsMap, setOptionsMap] = useState({});
 
   useEffect(() => {
-    // Create mode butuh activityData
     if (mode === FORM_MODE.CREATE && !activityData) return;
 
     const load = async () => {
       setLoading(true);
       try {
         const selectedDaftar = await fetchDaftarAktivitas({
-          // Edit mode: activityData di-null-kan agar hanya pakai daftarAktivitasId
           activityData: mode === FORM_MODE.CREATE ? activityData : null,
           daftarAktivitasId,
         });
@@ -45,7 +44,6 @@ export const useIdentitasFields = ({
         const filteredIdentitas = await fetchIdentitasFieldsService(selectedDaftar);
         setIdentitasFields(filteredIdentitas);
 
-        // Ambil opsi untuk semua field select (kecuali yang ditangani khusus)
         const selectFields = filteredIdentitas.filter(
           (f) =>
             f.tipe_input === 'select' &&
@@ -61,7 +59,7 @@ export const useIdentitasFields = ({
         setOptionsMap(optionsMapTemp);
       } catch (error) {
         console.error('Error fetching identitas fields:', error);
-        setError('Gagal memuat data identitas');
+        setError(getFriendlyError(error, 'Gagal memuat data identitas'));
       } finally {
         setLoading(false);
       }

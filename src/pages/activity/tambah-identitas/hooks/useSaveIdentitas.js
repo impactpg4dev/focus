@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { saveIdentitasData, updateIdentitasData } from '../services/identitasService';
 import { FORM_MODE } from '../constants';
+import { getFriendlyError } from '../../../../utils/permissionUtils';
 
 export const useSaveIdentitas = ({
   mode = FORM_MODE.CREATE,
@@ -19,7 +20,6 @@ export const useSaveIdentitas = ({
   const [successMessage, setSuccessMessage] = useState('');
   const [savedDataIdentitasId, setSavedDataIdentitasId] = useState(null);
 
-  // State untuk dialog (create mode)
   const [showItemDialog, setShowItemDialog] = useState(false);
   const [tempDataIdentitasId, setTempDataIdentitasId] = useState(null);
   const [tempDaftarAktivitasId, setTempDaftarAktivitasId] = useState(null);
@@ -82,9 +82,9 @@ export const useSaveIdentitas = ({
     } catch (error) {
       console.error('Error saving data:', error);
       if (mode === FORM_MODE.EDIT) {
-        setError('Gagal memperbarui data identitas: ' + error.message);
+        setError(getFriendlyError(error, 'Gagal memperbarui data identitas'));
       } else {
-        setError(error?.message || 'Gagal menyimpan data identitas');
+        setError(getFriendlyError(error, 'Gagal menyimpan data identitas'));
       }
     } finally {
       setSaving(false);

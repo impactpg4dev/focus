@@ -31,8 +31,8 @@ import { database, ref, get, child, push, set, update } from '../../../config/fi
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
+import { getFriendlyError } from '../../../utils/permissionUtils';
 
-// Fungsi untuk mendapatkan warna status (sama seperti di DataIdentitas)
 const getStatusColor = (statusName) => {
   if (!statusName) return 'text.primary';
   const lower = statusName.toLowerCase();
@@ -64,12 +64,10 @@ const TambahItem = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [identitasValues, setIdentitasValues] = useState({});
 
-  // 🔥 State untuk pelakuId, pelakuName, dan statusName
   const [pelakuId, setPelakuId] = useState(null);
   const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
 
-  // 🔥 State untuk menyimpan opsi dari dtb_option_values per field
   const [optionsMap, setOptionsMap] = useState({});
 
   const lokasiMapRef = useRef({});
@@ -82,7 +80,6 @@ const TambahItem = () => {
 
   const navigationState = location.state;
 
-  // 🔥 Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan item_aktivitas_id
   const fetchOptionValues = async (itemAktivitasId) => {
     try {
       const dbRef = ref(database);
@@ -264,7 +261,6 @@ const TambahItem = () => {
 
       setItemFields(foundItems);
 
-      // 🔥 Ambil data group dari dtb_group_item_aktivitas
       const groupSnapshot = await get(child(dbRef, 'dtb_group_item_aktivitas'));
       const groupData = groupSnapshot.val();
       const groupMap = {};
@@ -279,7 +275,6 @@ const TambahItem = () => {
       }
       setGroupData(groupMap);
 
-      // 🔥 Kelompokkan field berdasarkan group_item_aktivitas_id
       const grouped = {};
       const ungrouped = [];
       foundItems.forEach(field => {
@@ -296,7 +291,6 @@ const TambahItem = () => {
       });
       setGroupedFields(grouped);
 
-      // 🔥 Ambil opsi untuk semua field select
       const selectFields = foundItems.filter(f => f.tipe_input === 'select');
       const optionsMapTemp = {};
       for (const field of selectFields) {
@@ -313,7 +307,7 @@ const TambahItem = () => {
       }
     } catch (error) {
       console.error('Error fetching item fields:', error);
-      setError('Gagal memuat data item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal memuat data item'));
     } finally {
       setLoading(false);
     }
@@ -356,7 +350,6 @@ const TambahItem = () => {
     const placeholder = field.placeholder || '';
     const fieldValue = value !== undefined && value !== null ? String(value) : '';
 
-    // 🔥 Style label primary
     const labelSx = {
       '& .MuiInputLabel-root': {
         color: 'primary.main',
@@ -489,11 +482,9 @@ const TambahItem = () => {
     }
   };
 
-  // 🔥 Fungsi render dengan grouping (sama persis dengan di TambahDetailItem)
   const renderGroupedFields = (item, index) => {
     const renderItems = [];
 
-    // Field tanpa group
     const ungroupedFields = itemFields.filter(f => {
       const groupId = f.group_item_aktivitas_id || '';
       return !groupId || groupId === '';
@@ -508,7 +499,6 @@ const TambahItem = () => {
       });
     });
 
-    // Group
     const groupIds = Object.keys(groupedFields);
     groupIds.forEach(groupId => {
       const group = groupData[groupId];
@@ -620,11 +610,9 @@ const TambahItem = () => {
     }
   };
 
-  // 🔥 FUNGSI UPDATE STATUS IDENTITAS YANG DIPERBARUI
   const updateIdentitasStatus = async () => {
     try {
       const dbRef = ref(database);
-      // 1. Cek apakah daftar aktivitas ini memiliki field detail item
       const detailFieldsSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
       const detailFields = detailFieldsSnapshot.val();
       let hasDetailFields = false;
@@ -634,7 +622,6 @@ const TambahItem = () => {
         );
       }
 
-      // 2. Ambil semua item aktif untuk identitas ini
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
       const itemData = itemSnapshot.val();
       const activeItems = [];
@@ -647,11 +634,9 @@ const TambahItem = () => {
         }
       }
 
-      // 3. Tentukan status baru
       let statusName = 'ongoing';
       if (activeItems.length > 0) {
         if (hasDetailFields) {
-          // Jika ada detail fields, cek apakah semua item memiliki detail aktif
           const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
           const detailData = detailSnapshot.val();
           const allHasDetail = activeItems.every(item => {
@@ -666,12 +651,10 @@ const TambahItem = () => {
           });
           if (allHasDetail) statusName = 'draft';
         } else {
-          // Jika tidak ada detail fields, cukup ada item aktif => draft
           statusName = 'draft';
         }
       }
 
-      // 4. Update status identitas
       const statusId = await getStatusId(statusName);
       if (statusId) {
         const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
@@ -784,7 +767,7 @@ const TambahItem = () => {
       }
     } catch (error) {
       console.error('Error saving item data:', error);
-      setError('Gagal menyimpan data item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal menyimpan data item'));
     } finally {
       setSaving(false);
     }
@@ -855,16 +838,12 @@ const TambahItem = () => {
           </Box>
         </Box>
         
-        {/* ========================================================== */}
-        {/* DATA IDENTITAS - DENGAN PENAMBAHAN PENGAWAS & STATUS */}
-        {/* ========================================================== */}
         {Object.keys(identitasValues).length > 0 && (
           <Paper sx={{ p: 2, mb: 2, borderRadius: '4px', bgcolor: '#A5D6A7' }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
               Data Identitas
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 1 }}>
-              {/* Pembuat */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                   Di Buat Oleh
@@ -873,7 +852,6 @@ const TambahItem = () => {
                   {pelakuName || '-'}
                 </Typography>
               </Box>
-              {/* Status */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                   Status
@@ -882,7 +860,6 @@ const TambahItem = () => {
                   {statusName || '-'}
                 </Typography>
               </Box>
-              {/* Field identitas lainnya */}
               {Object.entries(identitasValues).map(([label, value]) => (
                 <Box
                   key={label}
@@ -948,7 +925,6 @@ const TambahItem = () => {
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </Box>
-                  {/* 🔥 Gunakan renderGroupedFields */}
                   {renderGroupedFields(item, index)}
                 </CardContent>
               </Card>

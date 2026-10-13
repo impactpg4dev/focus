@@ -37,6 +37,7 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { getActiveSession, getSessionHistory, isUserOnline } from '../../../utils/sessionUtils';
 import { database, ref, get, set, update } from '../../../config/firebase';
+import { getFriendlyError } from '../../../utils/permissionUtils';
 
 const Profil = () => {
   const { userData } = useAuth();
@@ -44,18 +45,15 @@ const Profil = () => {
   const [sessionHistory, setSessionHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
-  // State untuk menyimpan nama jabatan, departemen, status pekerjaan, dan status tenaga kerja
   const [jabatanName, setJabatanName] = useState('');
   const [departmentName, setDepartmentName] = useState('');
   const [statusPekerjaanName, setStatusPekerjaanName] = useState('');
   const [statusTenagaKerjaName, setStatusTenagaKerjaName] = useState('');
 
-  // State untuk data dari frtdb_users (hanya untuk status_update dan data yang diajukan)
   const [frtdbData, setFrtdbData] = useState(null);
   const [statusUpdate, setStatusUpdate] = useState('');
   const [loadingFrtdb, setLoadingFrtdb] = useState(false);
 
-  // State untuk edit
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -74,7 +72,7 @@ const Profil = () => {
   const [editError, setEditError] = useState('');
   const [editSuccess, setEditSuccess] = useState('');
 
-  // Ambil data dari frtdb_users (hanya untuk status_update dan data terbaru)
+  // Ambil data dari frtdb_users
   useEffect(() => {
     const fetchFrtdbData = async () => {
       if (!userData?.uid) return;
@@ -100,10 +98,9 @@ const Profil = () => {
     fetchFrtdbData();
   }, [userData]);
 
-  // Inisialisasi editForm: default dari userData, atau dari frtdbData jika pending
+  // Inisialisasi editForm
   useEffect(() => {
     if (!userData) return;
-    // Jika status pending, gunakan data dari frtdb (yang sudah berisi nilai terbaru)
     if (statusUpdate === 'pending' && frtdbData) {
       setEditForm({
         name: frtdbData.name || '',
@@ -115,7 +112,6 @@ const Profil = () => {
         signature: frtdbData.signature || '',
       });
     } else {
-      // Gunakan data dari userData (node users)
       setEditForm({
         name: userData.name || '',
         gender: userData.gender || '',
@@ -134,7 +130,7 @@ const Profil = () => {
     }
   }, [userData]);
 
-  // Ambil data jabatan dari u_position
+  // Ambil data jabatan
   useEffect(() => {
     if (userData?.id_jabatan) {
       const fetchJabatan = async () => {
@@ -158,7 +154,7 @@ const Profil = () => {
     }
   }, [userData?.id_jabatan]);
 
-  // Ambil data departemen dari u_department
+  // Ambil data departemen
   useEffect(() => {
     if (userData?.id_department) {
       const fetchDepartment = async () => {
@@ -182,7 +178,7 @@ const Profil = () => {
     }
   }, [userData?.id_department]);
 
-  // Ambil data status pekerjaan dari u_employment_type
+  // Ambil data status pekerjaan
   useEffect(() => {
     if (userData?.id_status_pekerjaan) {
       const fetchStatusPekerjaan = async () => {
@@ -206,7 +202,7 @@ const Profil = () => {
     }
   }, [userData?.id_status_pekerjaan]);
 
-  // Ambil data status tenaga kerja dari u_employment_status
+  // Ambil data status tenaga kerja
   useEffect(() => {
     if (userData?.id_status_tenaga_kerja) {
       const fetchStatusTenagaKerja = async () => {
@@ -263,7 +259,6 @@ const Profil = () => {
     });
   };
 
-  // Update status online setiap 1 menit
   useEffect(() => {
     if (!activeSession) return;
     const interval = setInterval(() => {
@@ -280,7 +275,6 @@ const Profil = () => {
     setIsEditing(true);
     setEditError('');
     setEditSuccess('');
-    // Jika status pending, gunakan data dari frtdbData (yang sudah berisi nilai terbaru)
     if (statusUpdate === 'pending' && frtdbData) {
       setEditForm({
         name: frtdbData.name || '',
@@ -292,7 +286,6 @@ const Profil = () => {
         signature: frtdbData.signature || '',
       });
     } else {
-      // Gunakan data dari userData
       setEditForm({
         name: userData.name || '',
         gender: userData.gender || '',
@@ -324,7 +317,6 @@ const Profil = () => {
         ...fileUploads,
         [field]: file,
       });
-      // Tampilkan preview sementara
       const previewUrl = URL.createObjectURL(file);
       setEditForm({
         ...editForm,
@@ -367,7 +359,6 @@ const Profil = () => {
     setLoading(true);
 
     try {
-      // Upload file jika ada yang baru
       let avatarUrl = editForm.avatar;
       let coverAvatarUrl = editForm.cover_avatar;
       let signatureUrl = editForm.signature;
@@ -382,8 +373,6 @@ const Profil = () => {
         signatureUrl = await uploadToImgbb(fileUploads.signature);
       }
 
-      // Siapkan data lengkap seperti di node users, dengan field yang diedit diperbarui
-      // Pastikan tidak ada properti statusData, emailData, emailKey
       const updatedData = {
         ...userData,
         name: editForm.name,
@@ -394,35 +383,30 @@ const Profil = () => {
         cover_avatar: coverAvatarUrl,
         signature: signatureUrl,
         updated_at: new Date().toISOString(),
-        status_update: 'pending', // tambahkan status pending
+        status_update: 'pending',
       };
 
-      // Hapus properti yang tidak diinginkan (jika ada)
       delete updatedData.statusData;
       delete updatedData.emailData;
       delete updatedData.emailKey;
 
-      // Simpan ke frtdb_users dengan UID sebagai key
       const frtdbRef = ref(database, `frtdb_users/${userData.uid}`);
       await set(frtdbRef, updatedData);
 
-      // Perbarui status_update dan frtdbData lokal
       setStatusUpdate('pending');
       setFrtdbData(updatedData);
 
       setEditSuccess('Perubahan berhasil disimpan dan menunggu persetujuan admin.');
       setIsEditing(false);
-      // Refresh data session (opsional)
       await fetchSessionData();
     } catch (error) {
       console.error('Error saving profile:', error);
-      setEditError('Gagal menyimpan perubahan: ' + error.message);
+      setEditError(getFriendlyError(error, 'Gagal menyimpan perubahan'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Data utama untuk tampilan adalah userData (dari node users)
   const displayData = userData;
 
   if (!userData && !loadingFrtdb) {
@@ -439,9 +423,7 @@ const Profil = () => {
         Profil
       </Typography>
 
-      {/* Profile Card */}
       <Paper sx={{ p: 3, mb: 3, mx: 1, borderRadius: '4px', textAlign: 'center', position: 'relative' }}>
-        {/* Tombol Edit di pojok kanan atas */}
         {!isEditing && (
           <IconButton
             sx={{ position: 'absolute', top: 8, right: 8 }}
@@ -453,7 +435,6 @@ const Profil = () => {
         )}
 
         {!isEditing ? (
-          // Mode tampilan biasa
           <>
             <Avatar
               src={displayData?.avatar}
@@ -480,7 +461,6 @@ const Profil = () => {
                 color={isOnline ? 'success' : 'warning'}
                 size="small"
               />
-              {/* Tampilkan chip status_update jika pending */}
               {statusUpdate === 'pending' && (
                 <Chip
                   label="Menunggu Persetujuan"
@@ -492,7 +472,6 @@ const Profil = () => {
             </Box>
           </>
         ) : (
-          // Mode Edit
           <Box sx={{ mt: 2, textAlign: 'left' }}>
             <Alert severity="info" sx={{ mb: 2 }}>
               Edit profil Anda. Field yang bertanda * wajib diisi. Perubahan akan disimpan dan menunggu persetujuan admin.
@@ -546,7 +525,6 @@ const Profil = () => {
               sx={{ mb: 2 }}
             />
 
-            {/* Avatar */}
             <Box sx={{ mb: 2 }}>
               <Typography variant="subtitle2" gutterBottom>
                 Avatar
@@ -562,7 +540,6 @@ const Profil = () => {
               </Button>
             </Box>
 
-            {/* Cover Avatar */}
             <Box sx={{ mb: 2 }}>
               <Typography variant="subtitle2" gutterBottom>
                 Cover Avatar
@@ -578,7 +555,6 @@ const Profil = () => {
               </Button>
             </Box>
 
-            {/* Signature */}
             <Box sx={{ mb: 2 }}>
               <Typography variant="subtitle2" gutterBottom>
                 Tanda Tangan
@@ -614,7 +590,6 @@ const Profil = () => {
                 Batal
               </Button>
             </Box>
-            {/* Tambahan info jika status pending */}
             {statusUpdate === 'pending' && (
               <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
                 ⚠️ Tombol Simpan dinonaktifkan karena perubahan sedang menunggu persetujuan admin.
@@ -624,11 +599,9 @@ const Profil = () => {
         )}
       </Paper>
 
-      {/* Detail Information - hanya tampil jika tidak dalam mode edit */}
       {!isEditing && (
         <Paper sx={{ mb: 3, mx: 1, borderRadius: '4px' }}>
           <List sx={{ p: 0 }}>
-            {/* ID User di paling atas */}
             <ListItem>
               <ListItemIcon>
                 <BadgeIcon color="primary" />
@@ -651,7 +624,6 @@ const Profil = () => {
             </ListItem>
             <Divider />
 
-            {/* Gmail di bawah Email Login */}
             <ListItem>
               <ListItemIcon>
                 <EmailIcon color="primary" />
@@ -731,7 +703,6 @@ const Profil = () => {
         </Paper>
       )}
 
-      {/* Session Info - tetap tampil meskipun edit mode */}
       {activeSession && (
         <Paper sx={{ p: 2, mb: 3, mx: 1, borderRadius: '4px' }}>
           <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>
@@ -756,7 +727,6 @@ const Profil = () => {
         </Paper>
       )}
 
-      {/* Session History */}
       {sessionHistory.length > 0 && (
         <Paper sx={{ p: 2, mb: 0, mx: 1, borderRadius: '4px' }}>
           <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>

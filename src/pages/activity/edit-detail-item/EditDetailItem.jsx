@@ -36,8 +36,8 @@ import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
 import HiddenFieldsDialog from '../../../components/activity/HiddenFieldsDialog';
 import { useHiddenFieldIds } from '../../../hooks/useHiddenFieldIds';
+import { getFriendlyError } from '../../../utils/permissionUtils';
 
-// Opsi untuk field Losses (tetap hardcoded sebagai fallback)
 const lossesOptions = [
   { label: 'ABNDN', value: 'ABNDN' },
   { label: 'ABNRL', value: 'ABNRL' },
@@ -59,13 +59,11 @@ const lossesOptions = [
   { label: 'TO', value: 'TO' },
 ];
 
-// 🔥 Internal fields yang tidak ditampilkan sebagai identitas
 const internalFields = [
   'id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName',
   'updatedAt', 'atasan_id', 'catatan_revisi', 'catatanRevisi', 'is_active'
 ];
 
-// 🔥 Fungsi untuk mendapatkan warna status
 const getStatusColor = (statusName) => {
   if (!statusName) return 'text.primary';
   const lower = statusName.toLowerCase();
@@ -77,10 +75,6 @@ const getStatusColor = (statusName) => {
   if (lower === 'rejected') return 'error.main';
   return 'text.primary';
 };
-
-// ============================================================
-// 🔥 FUNGSI UTILITAS UNTUK KALKULASI
-// ============================================================
 
 const calculateFieldValue = (field, itemValues, allFields) => {
   if (!field.is_calculation) {
@@ -131,10 +125,6 @@ const recalculateItem = (item, allFields) => {
   return { ...item, values: newValues };
 };
 
-// ============================================================
-// KOMPONEN UTAMA
-// ============================================================
-
 const EditDetailItem = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -157,12 +147,10 @@ const EditDetailItem = () => {
   const [itemValues, setItemValues] = useState({});
   const [editData, setEditData] = useState(null);
 
-  // 🔥 State untuk pelakuId, pelakuName, dan statusName
   const [pelakuId, setPelakuId] = useState(null);
   const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
 
-  // 🔥 State untuk menyimpan opsi dari dtb_option_values per field
   const [optionsMap, setOptionsMap] = useState({});
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -171,11 +159,9 @@ const EditDetailItem = () => {
   const [deleteSuccess, setDeleteSuccess] = useState(false);
   const [deleteSuccessMessage, setDeleteSuccessMessage] = useState('');
 
-  // ✅ ID-keyed info fields untuk panel hijau (shared dengan halaman lain)
   const [identitasInfoFields, setIdentitasInfoFields] = useState([]);
   const [itemInfoFields, setItemInfoFields] = useState([]);
 
-  // ✅ Shared hidden fields state (synced)
   const [hiddenFieldIds, setHiddenFieldIds] = useHiddenFieldIds();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -183,7 +169,6 @@ const EditDetailItem = () => {
 
   const navigationState = location.state;
 
-  // 🔥 Fungsi untuk mengambil opsi dari dtb_option_values berdasarkan detail_item_aktivitas_id
   const fetchOptionValues = async (detailItemAktivitasId) => {
     try {
       const dbRef = ref(database);
@@ -260,7 +245,6 @@ const EditDetailItem = () => {
         await fetchItemData(navigationState.dataItemId);
       }
 
-      // ✅ Fetch ID-keyed info untuk panel hijau + settings
       if (navigationState.dataIdentitasId) {
         await fetchIdentitasInfoFields(navigationState.dataIdentitasId);
       }
@@ -323,7 +307,6 @@ const EditDetailItem = () => {
     }
   };
 
-  // ✅ Fetch identitas info ID-keyed (untuk panel + settings)
   const fetchIdentitasInfoFields = async (dataIdentitasId) => {
     try {
       const dbRef = ref(database);
@@ -369,7 +352,6 @@ const EditDetailItem = () => {
     }
   };
 
-  // ✅ Fetch item info ID-keyed (untuk panel + settings)
   const fetchItemInfoFields = async (dataItemId) => {
     try {
       const dbRef = ref(database);
@@ -556,7 +538,7 @@ const EditDetailItem = () => {
       }
     } catch (error) {
       console.error('Error fetching detail item fields:', error);
-      setError('Gagal memuat data detail item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal memuat data detail item'));
     } finally {
       setLoading(false);
     }
@@ -641,7 +623,7 @@ const EditDetailItem = () => {
 
     } catch (error) {
       console.error('Error deleting detail item:', error);
-      setError('Gagal menghapus data detail item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal menghapus data detail item'));
     } finally {
       setDeleting(false);
     }
@@ -1022,7 +1004,7 @@ const EditDetailItem = () => {
       }, 1500);
     } catch (error) {
       console.error('Error saving detail item:', error);
-      setError('Gagal memperbarui data detail item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal memperbarui data detail item'));
     } finally {
       setSaving(false);
     }
@@ -1122,7 +1104,6 @@ const EditDetailItem = () => {
     );
   };
 
-  // ✅ Handler shared dialog
   const openSettings = () => setSettingsOpen(true);
   const closeSettings = () => setSettingsOpen(false);
   const saveSettings = (newHidden) => {
@@ -1163,7 +1144,6 @@ const EditDetailItem = () => {
         showLogout={false}
       />
       <Container maxWidth="sm" sx={{ pt: 2, pb: 8, px: 2 }}>
-        {/* Header Info */}
         <Box sx={{ mb:2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box>
             <Typography variant="caption" color="text.secondary">
@@ -1187,7 +1167,6 @@ const EditDetailItem = () => {
           </Box>
         </Box>
 
-        {/* PANEL HIJAU */}
         {showPanel && (
           <Paper sx={{ p: 2, mb: 2, borderRadius: '4px', bgcolor: '#A5D6A7' }}>
             {showIdentitasSection && (
@@ -1381,7 +1360,6 @@ const EditDetailItem = () => {
         loading={deleting}
       />
 
-      {/* ✅ Shared dialog pengaturan */}
       <HiddenFieldsDialog
         open={settingsOpen}
         onClose={closeSettings}

@@ -7,6 +7,7 @@ import {
   getCatatanField,
 } from '../utils/fieldUtils';
 import { convertYYYYMMDDToDDMMYYYY } from '../utils/dateUtils';
+import { getFriendlyError } from '../../../../utils/permissionUtils';
 
 // 🔥 Ambil opsi dari dtb_option_values berdasarkan identitas_aktivitas_id
 export const fetchOptionValues = async (identitasAktivitasId) => {
@@ -234,7 +235,12 @@ export const saveIdentitasData = async ({
     is_active: true,
   };
 
-  await set(newDataRefPush, newData);
+  try {
+    await set(newDataRefPush, newData);
+  } catch (error) {
+    console.error('❌ Gagal menyimpan data identitas utama:', error);
+    throw new Error(getFriendlyError(error, 'Gagal menyimpan data identitas.'));
+  }
 
   const valuesRef = ref(database, 'dtb_data_identitas_values');
   for (const field of identitasFields) {
@@ -248,14 +254,21 @@ export const saveIdentitasData = async ({
       if (typeof valueText === 'string' && valueText.trim() !== '') {
         const newValueRef = push(valuesRef);
         const dataIdentitasValueId = newValueRef.key;
-        await set(newValueRef, {
-          id_data_identitas_value: dataIdentitasValueId,
-          data_identitas_aktivitas_id: dataIdentitasId,
-          identitas_aktivitas_id: field.id_identitas_aktivitas,
-          value_text: valueText,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
+        try {
+          await set(newValueRef, {
+            id_data_identitas_value: dataIdentitasValueId,
+            data_identitas_aktivitas_id: dataIdentitasId,
+            identitas_aktivitas_id: field.id_identitas_aktivitas,
+            value_text: valueText,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error(`❌ Gagal menyimpan value untuk field ${field.label}:`, error);
+          throw new Error(
+            getFriendlyError(error, `Gagal menyimpan nilai untuk field "${field.label}".`)
+          );
+        }
       }
     }
   }
@@ -279,7 +292,13 @@ export const updateIdentitasData = async ({
   }
 
   const identitasRef = ref(database, `dtb_data_identitas_aktivitas/${dataIdentitasId}`);
-  await update(identitasRef, { updated_at: new Date().toISOString() });
+
+  try {
+    await update(identitasRef, { updated_at: new Date().toISOString() });
+  } catch (error) {
+    console.error('❌ Gagal update identitas:', error);
+    throw new Error(getFriendlyError(error, 'Gagal memperbarui data identitas.'));
+  }
 
   // Cek field Catatan → status draft
   const catatanField = getCatatanField(identitasFields);
@@ -288,10 +307,15 @@ export const updateIdentitasData = async ({
     if (catatanValue && catatanValue.trim() !== '') {
       const draftStatusId = await getStatusId('draft');
       if (draftStatusId) {
-        await update(identitasRef, {
-          status_aktivitas_id: draftStatusId,
-          updated_at: new Date().toISOString(),
-        });
+        try {
+          await update(identitasRef, {
+            status_aktivitas_id: draftStatusId,
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error('❌ Gagal update status draft:', error);
+          throw new Error(getFriendlyError(error, 'Gagal memperbarui status data identitas.'));
+        }
       }
     }
   }
@@ -303,7 +327,12 @@ export const updateIdentitasData = async ({
   if (valuesData) {
     for (const key in valuesData) {
       if (valuesData[key].data_identitas_aktivitas_id === dataIdentitasId) {
-        await remove(ref(database, `dtb_data_identitas_values/${key}`));
+        try {
+          await remove(ref(database, `dtb_data_identitas_values/${key}`));
+        } catch (error) {
+          console.error('❌ Gagal hapus value lama:', error);
+          throw new Error(getFriendlyError(error, 'Gagal memperbarui nilai identitas.'));
+        }
       }
     }
   }
@@ -320,14 +349,21 @@ export const updateIdentitasData = async ({
       if (typeof valueText === 'string' && valueText.trim() !== '') {
         const newValueRef = push(valuesRef);
         const dataIdentitasValueId = newValueRef.key;
-        await set(newValueRef, {
-          id_data_identitas_value: dataIdentitasValueId,
-          data_identitas_aktivitas_id: dataIdentitasId,
-          identitas_aktivitas_id: field.id_identitas_aktivitas,
-          value_text: valueText,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
+        try {
+          await set(newValueRef, {
+            id_data_identitas_value: dataIdentitasValueId,
+            data_identitas_aktivitas_id: dataIdentitasId,
+            identitas_aktivitas_id: field.id_identitas_aktivitas,
+            value_text: valueText,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error(`❌ Gagal simpan value baru ${field.label}:`, error);
+          throw new Error(
+            getFriendlyError(error, `Gagal menyimpan nilai untuk field "${field.label}".`)
+          );
+        }
       }
     }
   }

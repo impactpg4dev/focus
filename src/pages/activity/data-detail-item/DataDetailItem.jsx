@@ -38,14 +38,13 @@ import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
 import HiddenFieldsDialog from '../../../components/activity/HiddenFieldsDialog';
 import { useHiddenFieldIds } from '../../../hooks/useHiddenFieldIds';
+import { getFriendlyError } from '../../../utils/permissionUtils';
 
-// 🔥 Internal fields yang tidak ditampilkan sebagai identitas
 const internalFields = [
   'id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName',
   'updatedAt', 'atasan_id', 'catatan_revisi', 'catatanRevisi', 'is_active'
 ];
 
-// 🔥 Fungsi untuk mendapatkan warna status
 const getStatusColor = (statusName) => {
   if (!statusName) return 'text.primary';
   const lower = statusName.toLowerCase();
@@ -80,7 +79,6 @@ const DataDetailItem = () => {
   const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
 
-  // 🔥 State untuk izin dari dtb_daftar_aktivitas
   const [isAllowedByDaftar, setIsAllowedByDaftar] = useState(false);
   const [userRoleIds, setUserRoleIds] = useState([]);
   const [rolesLoaded, setRolesLoaded] = useState(false);
@@ -91,17 +89,14 @@ const DataDetailItem = () => {
   const [success, setSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
-  // ✅ ID-keyed info fields untuk panel hijau
   const [identitasInfoFields, setIdentitasInfoFields] = useState([]);
   const [itemInfoFields, setItemInfoFields] = useState([]);
 
-  // ✅ Shared hidden fields state (synced)
   const [hiddenFieldIds, setHiddenFieldIds] = useHiddenFieldIds();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const navigationState = location.state;
 
-  // ===== Ambil role user (ID) =====
   const fetchUserRoles = async () => {
     try {
       const dbRef = ref(database);
@@ -124,7 +119,6 @@ const DataDetailItem = () => {
     }
   };
 
-  // ===== Cek izin berdasarkan posisi dan role (AND) =====
   const checkUserAllowed = (allowedPositions, allowedRoles) => {
     if (!allowedPositions || !allowedRoles) return false;
 
@@ -146,7 +140,6 @@ const DataDetailItem = () => {
     return positionMatch && roleMatch;
   };
 
-  // ===== Ambil data daftar aktivitas untuk cek izin =====
   const fetchDaftarAktivitas = async (daftarId) => {
     try {
       const dbRef = ref(database);
@@ -165,7 +158,6 @@ const DataDetailItem = () => {
     }
   };
 
-  // Ambil role user
   useEffect(() => {
     const getRoles = async () => {
       const roleIds = await fetchUserRoles();
@@ -175,7 +167,6 @@ const DataDetailItem = () => {
     getRoles();
   }, [userData]);
 
-  // Cek izin setelah role dan daftar aktivitas id tersedia
   useEffect(() => {
     if (!rolesLoaded || !daftarAktivitasId) return;
 
@@ -232,7 +223,6 @@ const DataDetailItem = () => {
       const daftarId = navigationState.daftarAktivitasId;
       const dataIdentitasId = navigationState.dataIdentitasId;
 
-      // Ambil field detail item untuk urutan dan mapping
       const detailFieldsSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
       const detailFieldsData = detailFieldsSnapshot.val();
       let allFields = [];
@@ -249,7 +239,6 @@ const DataDetailItem = () => {
       }
       setDetailItemFields(allFields);
 
-      // Ambil data group
       const groupSnapshot = await get(child(dbRef, 'dtb_group_detail_item_aktivitas'));
       const groupData = groupSnapshot.val();
       const groupMap = {};
@@ -260,11 +249,9 @@ const DataDetailItem = () => {
       }
       setGroupData(groupMap);
 
-      // Ambil data detail item
       const detailSnapshot = await get(child(dbRef, 'dtb_data_detail_item_aktivitas'));
       const detailData = detailSnapshot.val();
 
-      // Ambil data detail item values
       const valuesSnapshot = await get(child(dbRef, 'dtb_data_detail_item_values'));
       const valuesData = valuesSnapshot.val();
 
@@ -310,10 +297,6 @@ const DataDetailItem = () => {
       }));
       formattedItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setDetailItems(formattedItems);
-
-      // ============================================================
-      // ✅ FETCH DATA UNTUK PANEL HIJAU (ID-keyed)
-      // ============================================================
 
       // ----- Identitas -----
       if (dataIdentitasId) {
@@ -390,7 +373,7 @@ const DataDetailItem = () => {
 
     } catch (error) {
       console.error('Error fetching detail item data:', error);
-      setError('Gagal memuat data detail item');
+      setError(getFriendlyError(error, 'Gagal memuat data detail item'));
     } finally {
       setLoading(false);
     }
@@ -496,7 +479,7 @@ const DataDetailItem = () => {
 
     } catch (error) {
       console.error('Error deleting detail item:', error);
-      setError('Gagal menghapus data detail item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal menghapus data detail item'));
     } finally {
       setDeleting(false);
     }
@@ -517,9 +500,6 @@ const DataDetailItem = () => {
     });
   };
 
-  // ============================================================
-  // ✅ HANDLER DIALOG PENGATURAN (shared)
-  // ============================================================
   const openSettings = () => setSettingsOpen(true);
   const closeSettings = () => setSettingsOpen(false);
   const saveSettings = (newHidden) => {
@@ -534,9 +514,6 @@ const DataDetailItem = () => {
     f => !hiddenFieldIds.includes(f.id)
   );
 
-  // ============================================================
-  // LOGIKA AKSES
-  // ============================================================
   const isAllowed = isAllowedByDaftar;
   const isAddable = isAllowed && ['draft', 'ongoing', 'rejected'].includes(statusName);
   const isEditable = isAddable;
@@ -985,7 +962,6 @@ const DataDetailItem = () => {
         loading={deleting}
       />
 
-      {/* ✅ Shared dialog pengaturan */}
       <HiddenFieldsDialog
         open={settingsOpen}
         onClose={closeSettings}

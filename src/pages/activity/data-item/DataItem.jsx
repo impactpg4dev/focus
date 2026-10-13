@@ -35,6 +35,7 @@ import { database, ref, get, child, update } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
+import { getFriendlyError } from '../../../utils/permissionUtils';
 
 const DataItem = () => {
   const navigate = useNavigate();
@@ -52,21 +53,16 @@ const DataItem = () => {
   const [pelakuId, setPelakuId] = useState(null);
   const [pelakuName, setPelakuName] = useState('');
   const [statusName, setStatusName] = useState('');
-  // 🔥 Tambahkan state untuk Status Approval
   const [statusApproval, setStatusApproval] = useState('');
 
-  // State untuk izin dari dtb_daftar_aktivitas
   const [isAllowedByDaftar, setIsAllowedByDaftar] = useState(false);
   const [userRoleIds, setUserRoleIds] = useState([]);
   const [rolesLoaded, setRolesLoaded] = useState(false);
 
-  // State untuk group data
   const [groupData, setGroupData] = useState({});
   const [fieldGroupMap, setFieldGroupMap] = useState({});
-  // ✅ State untuk menyimpan field metadata (untuk sorting by urutan)
   const [itemFields, setItemFields] = useState([]);
 
-  // 🔥 State untuk mengecek apakah ada detail item
   const [hasDetailItem, setHasDetailItem] = useState(false);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -78,7 +74,6 @@ const DataItem = () => {
   const navigationState = location.state;
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fungsi untuk mendapatkan warna status
   const getStatusColor = (statusName) => {
     if (!statusName) return 'default';
     const lower = statusName.toLowerCase();
@@ -208,7 +203,6 @@ const DataItem = () => {
     const statusFromValues = navigationState.identitasValues?.statusName || '';
     setStatusName(statusFromState || statusFromValues);
 
-    // 🔥 Ambil Status Approval dari navigationState
     const statusApprovalFromState = navigationState.statusApproval || '';
     const statusApprovalFromValues = navigationState.identitasValues?.statusApproval || '';
     setStatusApproval(statusApprovalFromState || statusApprovalFromValues);
@@ -247,7 +241,6 @@ const DataItem = () => {
       const dataIdentitasId = navigationState.dataIdentitasId;
       const daftarId = navigationState.daftarAktivitasId;
 
-      // 🔥 Cek apakah ada detail item untuk daftar aktivitas ini
       const detailItemSnapshot = await get(child(dbRef, 'dtb_detail_item_aktivitas'));
       const detailItemData = detailItemSnapshot.val();
       let hasDetail = false;
@@ -259,7 +252,6 @@ const DataItem = () => {
       }
       setHasDetailItem(hasDetail);
 
-      // Ambil data group
       const groupSnapshot = await get(child(dbRef, 'dtb_group_item_aktivitas'));
       const groupData = groupSnapshot.val();
       const groupMap = {};
@@ -274,7 +266,6 @@ const DataItem = () => {
       }
       setGroupData(groupMap);
 
-      // Ambil field item untuk mapping group_id + simpan field metadata untuk sorting
       const itemFieldsSnapshot = await get(child(dbRef, 'dtb_item_aktivitas'));
       const itemFieldsData = itemFieldsSnapshot.val();
       const itemFieldsMap = {};
@@ -295,7 +286,6 @@ const DataItem = () => {
       setFieldGroupMap(fieldGroupMapTemp);
       setItemFields(activeItemFields);
 
-      // Ambil data item
       const itemSnapshot = await get(child(dbRef, 'dtb_data_item_aktivitas'));
       const itemData = itemSnapshot.val();
 
@@ -314,9 +304,9 @@ const DataItem = () => {
           groupedItems[itemId] = {
             id: itemId,
             createdAt: item.created_at,
-            values: {},          // ✅ { [id_item_aktivitas]: value_text }
-            fieldLabels: {},     // ✅ { [id_item_aktivitas]: label }
-            fieldGroups: {},     // ✅ { [id_item_aktivitas]: group_id }
+            values: {},
+            fieldLabels: {},
+            fieldGroups: {},
             fullData: item,
             valueIds: [],
           };
@@ -348,7 +338,7 @@ const DataItem = () => {
       setDataItems(formattedData);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Gagal memuat data item');
+      setError(getFriendlyError(error, 'Gagal memuat data item'));
     } finally {
       setLoading(false);
     }
@@ -364,13 +354,11 @@ const DataItem = () => {
   };
 
   const handleViewDetail = (data) => {
-    // Jika tidak ada detail item, beri notifikasi atau langsung kembali
     if (!hasDetailItem) {
       setError('Daftar aktivitas ini tidak memiliki field detail item.');
       return;
     }
 
-    // ✅ Konversi values (ID-keyed) → label-keyed untuk display header di DataDetailItem
     const displayItemValues = {};
     Object.entries(data.values).forEach(([fieldId, value]) => {
       const label = data.fieldLabels[fieldId] || fieldId;
@@ -384,7 +372,7 @@ const DataItem = () => {
         daftarAktivitasId: daftarAktivitasId,
         aktivitasId: aktivitasId,
         identitasValues: identitasValues,
-        itemValues: displayItemValues, // ✅ label-keyed untuk display header
+        itemValues: displayItemValues,
         activityData: activityData,
         daftarAktivitasData: daftarAktivitasData,
         pelakuId: pelakuId,
@@ -422,7 +410,7 @@ const DataItem = () => {
         identitasValues: identitasValues,
         editData: {
           itemId: data.id,
-          values: data.values,       // ✅ ID-keyed
+          values: data.values,
           valueIds: data.valueIds || [],
         },
       }
@@ -491,7 +479,7 @@ const DataItem = () => {
 
     } catch (error) {
       console.error('Error deleting item:', error);
-      setError('Gagal menghapus data item: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal menghapus data item'));
     } finally {
       setDeleting(false);
     }
@@ -512,9 +500,6 @@ const DataItem = () => {
     });
   };
 
-  // ============================================================
-  // ✅ Fungsi untuk mengelompokkan values berdasarkan group (ID-based)
-  // ============================================================
   const getGroupedValues = (item) => {
     const grouped = {};
     const ungrouped = [];
@@ -531,7 +516,6 @@ const DataItem = () => {
       }
     });
 
-    // Urutkan field di dalam group sesuai field.urutan
     Object.keys(grouped).forEach(gid => {
       grouped[gid].sort((a, b) => {
         const fa = itemFields.find(f => f.id_item_aktivitas === a.fieldId);
@@ -540,7 +524,6 @@ const DataItem = () => {
       });
     });
 
-    // Urutkan ungrouped juga
     ungrouped.sort((a, b) => {
       const fa = itemFields.find(f => f.id_item_aktivitas === a.fieldId);
       const fb = itemFields.find(f => f.id_item_aktivitas === b.fieldId);
@@ -554,9 +537,6 @@ const DataItem = () => {
     return { grouped, ungrouped, sortedGroupIds };
   };
 
-  // ============================================================
-  // LOGIKA AKSES (hanya berdasarkan allowed_by_position & allowed_by_role)
-  // ============================================================
   const isAllowed = isAllowedByDaftar;
   const isAddable = isAllowed && ['draft', 'ongoing', 'rejected'].includes(statusName);
   const isEditable = isAddable;
@@ -591,7 +571,6 @@ const DataItem = () => {
     );
   }
 
-  // Cek akses: jika user diizinkan tetapi data bukan miliknya, tolak
   if (isAllowed && !isOwnData) {
     return (
       <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pt: 0, pb: 10 }}>
@@ -643,7 +622,6 @@ const DataItem = () => {
           />
         </Box>
 
-        {/* DATA IDENTITAS - DENGAN PERBAIKAN */}
         {Object.keys(identitasValues).length > 0 && (
           <Paper sx={{ p: 2, mb: 2, borderRadius: '4px', bgcolor: '#A5D6A7' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -668,7 +646,6 @@ const DataItem = () => {
                   {statusName || '-'}
                 </Typography>
               </Box>
-              {/* 🔥 Status Approval - ditampilkan dengan label yang benar */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
                   Status Approval
@@ -677,7 +654,6 @@ const DataItem = () => {
                   {statusApproval || '-'}
                 </Typography>
               </Box>
-              {/* 🔥 Field identitas lainnya - kecuali currentStepId, workflowId, statusApproval, dan internal fields */}
               {Object.entries(identitasValues)
                 .filter(([key]) => 
                   !['id', 'pelakuId', 'pelakuName', 'createdAt', 'status', 'statusName', 
@@ -773,7 +749,6 @@ const DataItem = () => {
 
                     <Divider sx={{ mb: 1.5 }} />
 
-                    {/* Render ungrouped fields */}
                     {ungrouped.length > 0 && (
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
                         {ungrouped.map(({ fieldId, label, value }) => (
@@ -804,7 +779,6 @@ const DataItem = () => {
                       </Box>
                     )}
 
-                    {/* Render grouped fields dalam Accordion */}
                     {sortedGroupIds.map(groupId => {
                       const group = groupData[groupId];
                       const fields = grouped[groupId];
@@ -868,7 +842,6 @@ const DataItem = () => {
 
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        {/* 🔥 Tombol Lihat Detail hanya muncul jika ada detail item */}
                         {hasDetailItem && (
                           <Button
                             size="small"
@@ -920,7 +893,6 @@ const DataItem = () => {
         )}
       </Container>
 
-      {/* Tombol Tambah Item Fixed di Bawah */}
       {dataItems.length > 0 && isAddable && (
         <Container
           maxWidth="sm"
@@ -960,7 +932,6 @@ const DataItem = () => {
         </Container>
       )}
 
-      {/* Dialog konfirmasi hapus */}
       <Dialog
         open={deleteDialogOpen}
         onClose={handleDeleteDialogClose}

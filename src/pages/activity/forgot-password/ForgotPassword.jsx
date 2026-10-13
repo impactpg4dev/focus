@@ -1,4 +1,4 @@
-// focus\src\pages\activity\forgot-password\ForgotPassword.jsx
+// focus/src/pages/activity/forgot-password/ForgotPassword.jsx
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -12,6 +12,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { auth, sendPasswordResetEmail } from '../../../config/firebase';
+import { getAuthFriendlyError } from '../../../utils/permissionUtils';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
@@ -30,11 +31,7 @@ const ForgotPassword = () => {
       setSuccess(true);
       setEmail('');
     } catch (err) {
-      if (err.code === 'auth/user-not-found') {
-        setError('Email tidak terdaftar');
-      } else {
-        setError(err.message || 'Gagal mengirim email reset password');
-      }
+      setError(getAuthFriendlyError(err, 'Gagal mengirim email reset password'));
     } finally {
       setLoading(false);
     }

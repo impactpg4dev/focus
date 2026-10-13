@@ -1,4 +1,4 @@
-// focus\src\pages\activity\register\Register.jsx
+// focus/src/pages/activity/register/Register.jsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
@@ -32,6 +32,7 @@ import {
   DB_PATHS,
 } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
+import { getAuthFriendlyError } from '../../../utils/permissionUtils';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -163,7 +164,6 @@ const Register = () => {
       if (!emailCheck.exists) {
         console.log('❌ Email not found in u_email');
         setError('Email tidak terdaftar. Silakan hubungi administrator.');
-        // Jangan hapus user, cukup sign out
         await signOut(auth);
         setLoading(false);
         return;
@@ -181,18 +181,7 @@ const Register = () => {
 
     } catch (err) {
       console.error('❌ Register error:', err);
-      
-      if (err.code === 'auth/email-already-in-use') {
-        setError('Email sudah terdaftar. Silakan login.');
-      } else if (err.code === 'auth/invalid-email') {
-        setError('Format email tidak valid');
-      } else if (err.code === 'auth/weak-password') {
-        setError('Password terlalu lemah. Gunakan minimal 6 karakter.');
-      } else if (err.code === 'auth/network-request-failed') {
-        setError('Gagal terhubung ke server. Periksa koneksi internet Anda.');
-      } else {
-        setError(err.message || 'Gagal mendaftar. Silakan coba lagi.');
-      }
+      setError(getAuthFriendlyError(err, 'Gagal mendaftar. Silakan coba lagi.'));
       setLoading(false);
     }
   };
@@ -242,18 +231,7 @@ const Register = () => {
 
     } catch (err) {
       console.error('❌ Google register error:', err);
-      
-      if (err.code === 'auth/popup-closed-by-user') {
-        setError('Pendaftaran dibatalkan.');
-      } else if (err.code === 'auth/popup-blocked') {
-        setError('Popup diblokir. Izinkan popup untuk mendaftar.');
-      } else if (err.code === 'auth/account-exists-with-different-credential') {
-        setError('Email sudah terdaftar dengan metode lain. Silakan login.');
-      } else if (err.code === 'auth/network-request-failed') {
-        setError('Gagal terhubung ke server. Periksa koneksi internet Anda.');
-      } else {
-        setError(err.message || 'Gagal mendaftar dengan Google. Silakan coba lagi.');
-      }
+      setError(getAuthFriendlyError(err, 'Gagal mendaftar dengan Google. Silakan coba lagi.'));
       setLoading(false);
     }
   };

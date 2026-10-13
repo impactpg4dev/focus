@@ -20,7 +20,6 @@ import {
   TextField,
 } from '@mui/material';
 import {
-  
   Visibility as VisibilityIcon,
   CalendarToday as CalendarIcon,
   EventNote as EventNoteIcon,
@@ -33,6 +32,7 @@ import { useAuth } from '../../../context/AuthContext';
 import AppBar from '../../../components/surface/app-bar/AppBar';
 import Dialog from '../../../components/feedback/dialog/Dialog';
 import { sendApprovalEmail } from '../../../utils/emailNotifier';
+import { getFriendlyError } from '../../../utils/permissionUtils';
 
 const DataIdentitas = () => {
   const navigate = useNavigate();
@@ -134,7 +134,7 @@ const DataIdentitas = () => {
   };
 
   // ============================================================
-  // 4. 🔥 FUNGSI BARU: Ambil workflow approval dari assignment user
+  // 4. Ambil workflow approval dari assignment user
   // ============================================================
   const getWorkflowApprovalFromAssignment = async (daftarAktivitasId, uid) => {
     try {
@@ -590,7 +590,7 @@ const DataIdentitas = () => {
 
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Gagal memuat data identitas');
+      setError(getFriendlyError(error, 'Gagal memuat data identitas'));
     } finally {
       setLoading(false);
     }
@@ -613,7 +613,6 @@ const DataIdentitas = () => {
     return assignedUsers.includes(userData?.uid);
   };
 
-  // 🔥 FUNGSI BARU: cek apakah user adalah approver di salah satu step di workflow yang sama
   const isUserApproverForWorkflow = (data) => {
     if (!data.workflowId) return false;
     const steps = Object.values(workflowStepsMap).filter(
@@ -764,7 +763,7 @@ const DataIdentitas = () => {
       await fetchData();
     } catch (error) {
       console.error('Error deleting identitas:', error);
-      setError('Gagal menghapus data identitas: ' + error.message);
+      setError(getFriendlyError(error, 'Gagal menghapus data identitas'));
     } finally {
       setDeleting(false);
     }
@@ -861,7 +860,6 @@ const DataIdentitas = () => {
       const userName = userData?.name || 'User';
       const roleName = jabatanName || '';
 
-      // 🔥 Kumpulkan data untuk kirim email (hanya untuk action 'kirim')
       const emailBatch = [];
 
       for (const id of selectedIds) {
@@ -930,7 +928,6 @@ const DataIdentitas = () => {
 
           finalStatusId = await getStatusId('pending');
 
-          // 🔥 Simpan info untuk kirim email
           if (firstStepId) {
             const dataValues = Object.entries(currentItem)
               .filter(
@@ -949,7 +946,7 @@ const DataIdentitas = () => {
                     'is_active',
                   ].includes(k)
               )
-              .slice(0, 8) // batasi maksimal 8 field
+              .slice(0, 8)
               .map(([label, value]) => ({ label, value }));
 
             emailBatch.push({
@@ -995,12 +992,10 @@ const DataIdentitas = () => {
         updates[`dtb_data_identitas_aktivitas/${key}/updated_at`] = new Date().toISOString();
       }
 
-      // Update Firebase (proses utama)
       if (Object.keys(updates).length > 0) {
         await update(ref(database), updates);
       }
 
-      // 🔥 KIRIM EMAIL setelah Firebase update sukses
       if (actionType === 'kirim' && emailBatch.length > 0) {
         const namaAktivitas = `${activityData?.inisial || ''} - ${
           daftarAktivitasData?.nama_daftar_aktivitas || 'Aktivitas'
@@ -1008,7 +1003,6 @@ const DataIdentitas = () => {
           .trim()
           .replace(/^-\s*/, '');
 
-        // Group by stepId — kalau 10 data dengan step sama, kirim 1 email ringkasan
         const groupedByStep = emailBatch.reduce((acc, item) => {
           acc[item.stepId] = acc[item.stepId] || [];
           acc[item.stepId].push(item);
@@ -1026,21 +1020,17 @@ const DataIdentitas = () => {
             })
             .slice(0, 15);
 
-          const pelakuNames = [...new Set(items.map((i) => i.pelakuName))].join(
-            ', '
-          );
+          const pelakuNames = [...new Set(items.map((i) => i.pelakuName))].join(', ');
 
           try {
             const result = await sendApprovalEmail(stepId, {
               namaAktivitas,
               pelakuName:
-                pelakuNames +
-                (items.length > 1 ? ` (${items.length} data)` : ''),
+                pelakuNames + (items.length > 1 ? ` (${items.length} data)` : ''),
               dataValues: combinedValues,
             });
             console.log('📧 Hasil kirim email:', result);
           } catch (emailErr) {
-            // Jangan batalkan proses utama kalau email gagal
             console.error('❌ Gagal kirim email approval:', emailErr);
           }
         }
@@ -1053,7 +1043,7 @@ const DataIdentitas = () => {
       await fetchData();
     } catch (err) {
       console.error('Error executing action:', err);
-      setError('Gagal melakukan aksi: ' + err.message);
+      setError(getFriendlyError(err, 'Gagal melakukan aksi'));
     } finally {
       setActionLoading(false);
     }
@@ -1094,22 +1084,17 @@ const DataIdentitas = () => {
 
   const canSend = isUserAllowedToSend();
 
-  // ---------- Filter data ----------
-  // 1. Data milik sendiri (semua status)
   const ownData = dataIdentitas.filter(item => 
     item.pelakuId === userData?.uid && 
     item.is_active !== false
   );
 
-  // 🔥 2. Data approval: tampilkan data yang memiliki currentStepId, status pending/approved,
-  //     dan user adalah approver di salah satu step di workflow yang sama
   const approvalData = dataIdentitas.filter(item => 
     item.currentStepId && 
     (item.statusName === 'pending' || item.statusName === 'approved') &&
     isUserApproverForWorkflow(item)
   );
 
-  // Gabungkan, hindari duplikasi
   const mergedMap = new Map();
   [...ownData, ...approvalData].forEach(item => {
     if (!mergedMap.has(item.id)) {
@@ -1118,14 +1103,11 @@ const DataIdentitas = () => {
   });
   let filteredData = Array.from(mergedMap.values());
 
-  // ---------- Eligible data (untuk dicentang) ----------
   const eligibleData = filteredData.filter(item => {
-    // User dapat memilih data milik sendiri yang status draft/rejected (jika dia punya izin kirim)
     if (canSend && item.pelakuId === userData?.uid && 
         (item.statusName === 'draft' || item.statusName === 'rejected')) {
       return true;
     }
-    // Atau data yang memiliki currentStepId, user adalah approver di step saat ini dan step approval aktif
     if (item.currentStepId && 
         isUserApproverForData(item) && 
         isApprovalButtonsVisible(item.currentStepId)) {
@@ -1153,7 +1135,6 @@ const DataIdentitas = () => {
     return data.currentStepId && isApprovalButtonsVisible(data.currentStepId);
   });
 
-  // ==================== RENDER UI ====================
   return (
     <Box sx={{ bgcolor: 'background.default', minHeight: '100vh', pt: 0, pb: 10 }}>
       <AppBar
@@ -1438,7 +1419,6 @@ const DataIdentitas = () => {
         )}
       </Container>
 
-      {/* ==================== FOOTER ==================== */}
       <Container
         maxWidth="sm"
         sx={{

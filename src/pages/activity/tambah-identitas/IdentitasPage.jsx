@@ -24,7 +24,6 @@ const IdentitasPage = ({ mode = FORM_MODE.CREATE }) => {
 
   const isEdit = mode === FORM_MODE.EDIT;
 
-  // Ambil data dari navigation state berdasarkan mode
   const activityData = isEdit
     ? navigationState?.activityData
     : navigationState?.activity;
@@ -35,13 +34,11 @@ const IdentitasPage = ({ mode = FORM_MODE.CREATE }) => {
   const lokasiTerpilih = !isEdit ? navigationState?.lokasiTerpilih : null;
   const dataIdentitasId = isEdit ? navigationState?.dataIdentitasId : null;
 
-  // Stabilkan existingValues agar tidak memicu loop di hook form
   const existingValues = useMemo(() => {
     if (!isEdit) return null;
     return navigationState?.identitasValues || {};
   }, [isEdit, navigationState?.identitasValues]);
 
-  // Validasi navigasi
   useEffect(() => {
     if (!isEdit && !activityData) {
       navigate('/');
@@ -120,7 +117,6 @@ const IdentitasPage = ({ mode = FORM_MODE.CREATE }) => {
     );
   }
 
-  // Teks yang berbeda antar mode
   const appBarTitle = isEdit ? 'Edit Identitas' : 'Tambah Identitas';
   const formTitle = isEdit ? 'Edit Form Identitas' : 'Form Identitas';
   const buttonLabel = isEdit ? 'Perbarui Identitas' : 'Simpan Identitas';
@@ -128,7 +124,6 @@ const IdentitasPage = ({ mode = FORM_MODE.CREATE }) => {
     ? 'Data identitas berhasil diperbarui!'
     : 'Data identitas berhasil disimpan!';
 
-  // Header daftar aktivitas: edit pakai nav state, create pakai hasil fetch + fallback
   const daftarAktivitasName = isEdit
     ? daftarAktivitasData?.nama_daftar_aktivitas
     : selectedDaftarAktivitas?.nama_daftar_aktivitas ||
@@ -163,12 +158,10 @@ const IdentitasPage = ({ mode = FORM_MODE.CREATE }) => {
         />
       </Container>
 
-      {/* Create: hanya tampil jika fields ada. Edit: selalu tampil */}
       {(isEdit || identitasFields.length > 0) && (
         <SaveButtonBar saving={saving} onSave={handleSave} label={buttonLabel} />
       )}
 
-      {/* Dialog hanya untuk create mode */}
       {!isEdit && (
         <TambahItemDialog
           open={showItemDialog}

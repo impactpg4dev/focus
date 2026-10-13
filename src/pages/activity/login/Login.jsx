@@ -29,14 +29,15 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   getDeviceInfo,
   getIP,
-  getLocationFromIP,      // fallback
-  getCombinedLocation,    // <-- baru: menggabungkan IP + browser geolocation
+  getLocationFromIP,
+  getCombinedLocation,
   getConnectionType,
   saveDeviceInfo,
   saveNetworkInfo,
   saveLocationInfo,
   createSession,
 } from '../../../utils/sessionUtils';
+import { getAuthFriendlyError } from '../../../utils/permissionUtils';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -178,9 +179,6 @@ const Login = () => {
         const deviceInfo = getDeviceInfo();
         const ip = await getIP();
 
-        // --- PERUBAHAN UTAMA DI SINI ---
-        // Gunakan getCombinedLocation untuk mendapatkan lat, lon, accuracy dari browser
-        // dan fallback ke IP jika geolocation ditolak / tidak tersedia
         let locationData;
         try {
           locationData = await getCombinedLocation(ip);
@@ -188,21 +186,17 @@ const Login = () => {
         } catch (locErr) {
           console.warn('Gagal mendapatkan lokasi gabungan, fallback ke IP:', locErr);
           locationData = await getLocationFromIP(ip);
-          // Pastikan accuracy tetap null
           locationData.accuracy = null;
         }
 
         const connectionType = getConnectionType();
 
-        // Simpan device, network, location
         const deviceId = await saveDeviceInfo(userId, deviceInfo);
         const networkId = await saveNetworkInfo(userId, ip, locationData.isp, connectionType);
-        const locationId = await saveLocationInfo(userId, locationData); // otomatis menyimpan lat, lon, accuracy
+        const locationId = await saveLocationInfo(userId, locationData);
 
-        // Buat session
         const sessionId = await createSession(userId, deviceId, networkId, locationId);
 
-        // Simpan sessionId di localStorage untuk referensi
         localStorage.setItem('focus_session_id', sessionId);
 
         console.log('✅ Session created:', sessionId);
@@ -216,15 +210,7 @@ const Login = () => {
 
     } catch (err) {
       console.error('Login error:', err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        setError('Email atau password salah');
-      } else if (err.code === 'auth/invalid-email') {
-        setError('Format email tidak valid');
-      } else if (err.code === 'auth/too-many-requests') {
-        setError('Terlalu banyak percobaan. Coba lagi nanti.');
-      } else {
-        setError(err.message || 'Gagal login. Silakan coba lagi.');
-      }
+      setError(getAuthFriendlyError(err, 'Gagal login. Silakan coba lagi.'));
       setLoading(false);
     }
   };
@@ -314,4 +300,3 @@ const Login = () => {
 };
 
 export default Login;
-
